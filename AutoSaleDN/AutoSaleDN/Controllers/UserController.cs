@@ -11,6 +11,7 @@ using static AutoSaleDN.DTO.Auth;
 using MimeKit;
 using MailKit.Net.Smtp;
 using Microsoft.Extensions.Caching.Memory;
+using Microsoft.AspNetCore.Authorization;
 
 [Route("api/[controller]")]
 [ApiController]
@@ -42,7 +43,8 @@ public class UserController : ControllerBase
             Role = model.Role,
             Password = BCrypt.Net.BCrypt.HashPassword(model.Password),
             CreatedAt = DateTime.UtcNow,
-            UpdatedAt = DateTime.UtcNow
+            UpdatedAt = DateTime.UtcNow,
+            Province = model.Province
         };
         _context.Users.Add(user);
         await _context.SaveChangesAsync();
@@ -52,12 +54,44 @@ public class UserController : ControllerBase
     [HttpPost("login")]
     public async Task<IActionResult> Login([FromBody] LoginDto model)
     {
-        var user = await _context.Users.SingleOrDefaultAsync(x => x.Name == model.Name);
+        var user = await _context.Users.SingleOrDefaultAsync(x => x.Email == model.Email);
         if (user == null || !BCrypt.Net.BCrypt.Verify(model.Password, user.Password))
-            return Unauthorized("Invalid username or password.");
+            return Unauthorized("Invalid Email or password.");
 
         var token = GenerateJwtToken(user);
         return Ok(new { token });
+    }
+
+    [HttpGet("me")]
+    [Authorize]
+    public async Task<ActionResult<UserDto>> GetCurrentUser()
+    {
+        var userId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+        if (string.IsNullOrEmpty(userId))
+        {
+            return Unauthorized();
+        }
+
+        var user = await _context.Users
+            .Where(u => u.UserId == Int32.Parse(userId))
+            .Select(u => new UserDto
+            {
+                UserId = u.UserId,
+                Name = u.Name,
+                Email = u.Email,
+                FullName = u.FullName,
+                Mobile = u.Mobile,
+                Province = u.Province,
+                Role = u.Role
+            })
+            .FirstOrDefaultAsync();
+
+        if (user == null)
+        {
+            return NotFound();
+        }
+
+        return Ok(user);
     }
 
     [HttpPost("forgotpassword")]

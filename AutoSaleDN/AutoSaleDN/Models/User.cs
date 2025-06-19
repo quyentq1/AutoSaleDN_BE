@@ -19,6 +19,9 @@ namespace AutoSaleDN.Models
         public string? Mobile { get; set; }
         [Required, StringLength(20)]
         public string Role { get; set; }
+
+        [Required, StringLength(100)]
+        public string Province { get; set; }
         public DateTime CreatedAt { get; set; } = DateTime.Now;
         public DateTime UpdatedAt { get; set; } = DateTime.Now;
 
