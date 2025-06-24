@@ -51,7 +51,46 @@ namespace AutoSaleDN.Controllers
 
             if (user == null)
                 return NotFound();
-            return Ok(user);
+
+            // Get sales transaction history for this customer (as buyer)
+            var transactions = await (
+                from sale in _context.CarSales
+                join listing in _context.CarListings on sale.ListingId equals listing.ListingId
+                join model in _context.CarModels on listing.ModelId equals model.ModelId
+                join manu in _context.CarManufacturers on model.ManufacturerId equals manu.ManufacturerId
+                join status in _context.SaleStatus on sale.SaleStatusId equals status.SaleStatusId
+                where listing.UserId == id // The customer is the buyer (listing.UserId) - adjust if your logic is different!
+                select new
+                {
+                    sale.SaleId,
+                    sale.SaleDate,
+                    sale.FinalPrice,
+                    SaleStatus = status.StatusName,
+                    Car = new
+                    {
+                        listing.ListingId,
+                        Manufacturer = manu.Name,
+                        Model = model.Name,
+                        listing.Year,
+                        listing.Mileage,
+                        listing.Price,
+                        listing.Location,
+                        listing.Condition,
+                        listing.RentSell
+                    },
+                    sale.CreatedAt,
+                    sale.UpdatedAt
+                }
+            ).OrderByDescending(s => s.SaleDate)
+             .ToListAsync();
+
+            // Optionally, include bookings, payments, ... as needed.
+
+            return Ok(new
+            {
+                user,
+                salesHistory = transactions
+            });
         }
 
         [HttpPost("customers")]

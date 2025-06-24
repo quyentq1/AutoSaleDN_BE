@@ -59,7 +59,11 @@ public class UserController : ControllerBase
             return Unauthorized("Invalid Email or password.");
 
         var token = GenerateJwtToken(user);
-        return Ok(new { token });
+        return Ok(new
+        {
+            token,
+            role = user.Role
+        });
     }
 
     [HttpGet("me")]
