@@ -28,6 +28,9 @@ namespace AutoSaleDN.Models
         public DbSet<CarSale> CarSales { get; set; }
         public DbSet<PaymentTransaction> PaymentTransactions { get; set; }
 
+        public DbSet<CarInventory> CarInventories { get; set; }
+        public DbSet<CarColor> CarColors { get; set; }
+
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
             // Unique constraints
