@@ -45,6 +45,7 @@ namespace AutoSaleDN.Controllers
                     u.FullName,
                     u.Mobile,
                     u.Role,
+                    u.Province,
                     u.CreatedAt,
                     u.UpdatedAt
                 }).FirstOrDefaultAsync();
@@ -203,29 +204,90 @@ namespace AutoSaleDN.Controllers
             return Ok(car);
         }
 
-        [HttpPost("cars")]
-        public async Task<ActionResult> CreateCar([FromBody] CarListing model)
+        [HttpPost("cars/add")]
+        public async Task<IActionResult> AddNewCar([FromBody] AddCarDto dto)
         {
+            // 1. Tạo CarListing
             var car = new CarListing
             {
-                ModelId = model.ModelId,
-                UserId = model.UserId,
-                Year = model.Year,
-                Mileage = model.Mileage,
-                Price = model.Price,
-                Location = model.Location,
-                Condition = model.Condition,
-                RentSell = model.RentSell,
-                ListingStatus = model.ListingStatus ?? "active",
-                DatePosted = DateTime.UtcNow,
-                DateUpdated = DateTime.UtcNow,
-                Certified = model.Certified,
-                Vin = model.Vin,
-                Description = model.Description
+                ModelId = dto.ModelId,
+                UserId = dto.UserId,
+                Year = dto.Year,
+                Mileage = dto.Mileage,
+                Price = dto.Price,
+                Location = dto.Location,
+                Condition = dto.Condition,
+                RentSell = dto.RentSell,
+                Description = dto.Description,
+                Certified = dto.Certified,
+                Vin = dto.Vin,
+                DatePosted = DateTime.Now,
+                DateUpdated = DateTime.Now,
+                ListingStatus = "Available"
             };
             _context.CarListings.Add(car);
             await _context.SaveChangesAsync();
-            return Ok(new { message = "Car created successfully" });
+
+            // 2. CarSpecification
+            var spec = new CarSpecification
+            {
+                ListingId = car.ListingId,
+                ExteriorColor = dto.Color,
+                InteriorColor = dto.InteriorColor,
+                Transmission = dto.Transmission,
+                Engine = dto.Engine,
+                FuelType = dto.FuelType,
+                CarType = dto.CarType,
+                SeatingCapacity = dto.SeatingCapacity
+            };
+            _context.CarSpecifications.Add(spec);
+
+            // 3. CarPricingDetail
+            var pricing = new CarPricingDetail
+            {
+                ListingId = car.ListingId,
+                RegistrationFee = dto.RegistrationFee,
+                TaxRate = dto.TaxRate
+            };
+            _context.CarPricingDetails.Add(pricing);
+
+            // 4. CarInventory
+            var inventory = new CarInventory
+            {
+                ModelId = dto.ModelId,
+                ColorId = dto.ColorId,
+                QuantityImported = dto.QuantityImported,
+                QuantityAvailable = dto.QuantityImported,
+                QuantitySold = 0,
+                ImportDate = dto.ImportDate,
+                ImportPrice = dto.ImportPrice,
+                Notes = dto.Notes
+            };
+            _context.CarInventories.Add(inventory);
+
+            // 5. CarImages
+            foreach (var url in dto.ImageUrls)
+            {
+                _context.CarImages.Add(new CarImage
+                {
+                    ListingId = car.ListingId,
+                    Url = url
+                });
+            }
+
+            // 6. CarListingFeature
+            foreach (var fid in dto.FeatureIds)
+            {
+                _context.CarListingFeatures.Add(new CarListingFeature
+                {
+                    ListingId = car.ListingId,
+                    FeatureId = fid
+                });
+            }
+
+            await _context.SaveChangesAsync();
+
+            return Ok(new { success = true, message = "Car added successfully" });
         }
 
         [HttpPut("cars/{id}")]
@@ -338,91 +400,7 @@ namespace AutoSaleDN.Controllers
             });
         }
 
-        [HttpPost("cars/add")]
-        public async Task<IActionResult> AddNewCar([FromBody] AddCarDto dto)
-        {
-            // 1. Tạo CarListing
-            var car = new CarListing
-            {
-                ModelId = dto.ModelId,
-                UserId = dto.UserId,
-                Year = dto.Year,
-                Mileage = dto.Mileage,
-                Price = dto.Price,
-                Location = dto.Location,
-                Condition = dto.Condition,
-                RentSell = dto.RentSell,
-                Description = dto.Description,
-                Certified = dto.Certified,
-                Vin = dto.Vin,
-                DatePosted = DateTime.Now,
-                DateUpdated = DateTime.Now,
-                ListingStatus = "Available"
-            };
-            _context.CarListings.Add(car);
-            await _context.SaveChangesAsync();
-
-            // 2. CarSpecification
-            var spec = new CarSpecification
-            {
-                ListingId = car.ListingId,
-                ExteriorColor = dto.Color,
-                InteriorColor = dto.InteriorColor,
-                Transmission = dto.Transmission,
-                Engine = dto.Engine,
-                FuelType = dto.FuelType,
-                CarType = dto.CarType,
-                SeatingCapacity = dto.SeatingCapacity
-            };
-            _context.CarSpecifications.Add(spec);
-
-            // 3. CarPricingDetail
-            var pricing = new CarPricingDetail
-            {
-                ListingId = car.ListingId,
-                RegistrationFee = dto.RegistrationFee,
-                TaxRate = dto.TaxRate
-            };
-            _context.CarPricingDetails.Add(pricing);
-
-            // 4. CarInventory
-            var inventory = new CarInventory
-            {
-                ModelId = dto.ModelId,
-                ColorId = dto.ColorId,
-                QuantityImported = dto.QuantityImported,
-                QuantityAvailable = dto.QuantityImported,
-                QuantitySold = 0,
-                ImportDate = dto.ImportDate,
-                ImportPrice = dto.ImportPrice,
-                Notes = dto.Notes
-            };
-            _context.CarInventories.Add(inventory);
-
-            // 5. CarImages
-            foreach (var url in dto.ImageUrls)
-            {
-                _context.CarImages.Add(new CarImage
-                {
-                    ListingId = car.ListingId,
-                    Url = url
-                });
-            }
-
-            // 6. CarListingFeature
-            foreach (var fid in dto.FeatureIds)
-            {
-                _context.CarListingFeatures.Add(new CarListingFeature
-                {
-                    ListingId = car.ListingId,
-                    FeatureId = fid
-                });
-            }
-
-            await _context.SaveChangesAsync();
-
-            return Ok(new { success = true, message = "Car added successfully" });
-        }
+        
 
         public class AddCarDto
         {
