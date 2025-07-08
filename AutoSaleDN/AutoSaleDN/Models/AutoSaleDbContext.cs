@@ -30,6 +30,9 @@ namespace AutoSaleDN.Models
 
         public DbSet<CarInventory> CarInventories { get; set; }
         public DbSet<CarColor> CarColors { get; set; }
+        public DbSet<Promotion> Promotions { get; set; }
+        public DbSet<StoreLocation> StoreLocations { get; set; }
+        public DbSet<DeliveryAddress> DeliveryAddresses { get; set; }
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
@@ -122,6 +125,11 @@ namespace AutoSaleDN.Models
                 .HasForeignKey(r => r.ListingId)
                 .OnDelete(DeleteBehavior.Restrict);
 
+            modelBuilder.Entity<StoreLocation>()
+                .HasOne(s => s.User)
+                .WithOne()
+                .HasForeignKey<StoreLocation>(s => s.UserId)
+                .OnDelete(DeleteBehavior.Restrict);
         }
     }
 }
