@@ -83,25 +83,325 @@ namespace AutoSaleDN.Controllers
             return Ok(new { message = "Address updated" });
         }
 
-        // 4. Xem, tìm kiếm, lọc xe
         [HttpGet("cars")]
-        public async Task<IActionResult> GetCars([FromQuery] string? keyword = null)
+        public async Task<IActionResult> GetCars(
+             [FromQuery] string? keyword = null,
+             [FromQuery] string? paymentType = null,
+             [FromQuery] decimal? priceFrom = null,
+             [FromQuery] decimal? priceTo = null,
+             [FromQuery] bool? vatDeduction = null,
+             [FromQuery] bool? discountedCars = null,
+             [FromQuery] bool? premiumPartners = null,
+             [FromQuery] int? registrationFrom = null,
+             [FromQuery] int? registrationTo = null,
+             [FromQuery] int? mileageFrom = null,
+             [FromQuery] int? mileageTo = null,
+             [FromQuery] string? transmission = null,
+             [FromQuery] string? fuel = null,
+             [FromQuery] string? powerUnit = null, // "kW" or "hp" - you'll convert in C#
+             [FromQuery] double? powerFrom = null, // Using double for flexibility (kW/hp values)
+             [FromQuery] double? powerTo = null,
+             [FromQuery] string? vehicleType = null,
+             [FromQuery] bool? driveType4x4 = null,
+             [FromQuery] string? exteriorColor = null,
+             [FromQuery] List<string>? features = null // List to handle multiple feature parameters
+         )
         {
-            var query = _context.CarListings.AsQueryable();
+            var query = _context.CarListings
+                .Include(c => c.Model)
+                .ThenInclude(m => m.Manufacturer)
+                .Include(c => c.Specifications)
+                .Include(c => c.CarImages)
+                .Include(c => c.CarListingFeatures)
+                    .ThenInclude(clf => clf.Feature)
+                .Include(c => c.CarServiceHistories)
+                .Include(c => c.CarPricingDetails)
+                .Include(c => c.CarSales)
+                .ThenInclude(s => s.SaleStatus)
+                .Include(c => c.Reviews)
+                .ThenInclude(r => r.User)
+                .AsQueryable();
+
+            // Apply Keyword Filter
             if (!string.IsNullOrEmpty(keyword))
-                query = query.Where(c => c.Description.Contains(keyword) || c.Location.Contains(keyword));
-            var cars = await query.ToListAsync();
+            {
+                query = query.Where(c =>
+                    c.Model.Name.Contains(keyword) ||
+                    c.Model.Manufacturer.Name.Contains(keyword) ||
+                    c.Description.Contains(keyword) ||
+                    c.Location.Contains(keyword) ||
+                    c.Year.ToString().Contains(keyword)
+                );
+            }
+            if (priceFrom.HasValue)
+            {
+                query = query.Where(c => c.Price >= priceFrom.Value);
+            }
+            if (priceTo.HasValue)
+            {
+                query = query.Where(c => c.Price <= priceTo.Value);
+            }
+            if (vatDeduction.HasValue && vatDeduction.Value)
+            {
+                query = query.Where(c => c.CarPricingDetails.Any());
+            }
+            if (discountedCars.HasValue && discountedCars.Value)
+            {
+                // Assuming you have a 'IsDiscounted' or 'DiscountAmount' property
+                // or a related table for discounts. Example:
+                // query = query.Where(c => c.HasDiscount == true);
+                // For this example, let's assume it means Price < OriginalPrice, if you track that
+                // Or you might have a dedicated property on CarListing
+            }
+            if (premiumPartners.HasValue && premiumPartners.Value)
+            {
+                // Assuming you have a way to identify premium partners (e.g., User property)
+                // query = query.Where(c => c.User.IsPremiumPartner == true);
+            }
+
+            // Apply Registration Year Filter (assuming 'Year' field is registration year)
+            if (registrationFrom.HasValue)
+            {
+                query = query.Where(c => c.Year >= registrationFrom.Value);
+            }
+            if (registrationTo.HasValue)
+            {
+                query = query.Where(c => c.Year <= registrationTo.Value);
+            }
+
+            // Apply Mileage Filters
+            if (mileageFrom.HasValue)
+            {
+                query = query.Where(c => c.Mileage >= mileageFrom.Value);
+            }
+            if (mileageTo.HasValue)
+            {
+                query = query.Where(c => c.Mileage <= mileageTo.Value);
+            }
+
+            // Apply Transmission Filter (from Specifications)
+            if (!string.IsNullOrEmpty(transmission))
+            {
+                query = query.Where(c => c.Specifications.Any(s => s.Transmission == transmission));
+            }
+
+            // Apply Fuel Type Filter (from Specifications)
+            if (!string.IsNullOrEmpty(fuel))
+            {
+                query = query.Where(c => c.Specifications.Any(s => s.FuelType == fuel));
+            }
+
+            // Apply Power Filters (from Specifications, need to handle unit conversion if necessary)
+            
+
+
+            // Apply Vehicle Type Filter (from Specifications)
+            if (!string.IsNullOrEmpty(vehicleType))
+            {
+                query = query.Where(c => c.Specifications.Any(s => s.CarType == vehicleType));
+            }
+
+            // Apply Drive Type 4x4 Filter (assuming CarType or a specific feature indicates 4x4)
+            if (driveType4x4.HasValue && driveType4x4.Value)
+            {
+                // This assumes your CarType field might contain "4x4" or you have a dedicated property
+                // or a feature for 4x4. Adjust as per your data model.
+                // Example: query = query.Where(c => c.Specifications.Any(s => s.DriveType == "4x4"));
+                // Or if '4x4' is a feature:
+                query = query.Where(c => c.CarListingFeatures.Any(clf => clf.Feature.Name == "4x4"));
+            }
+
+            // Apply Exterior Color Filter (from Specifications)
+            if (!string.IsNullOrEmpty(exteriorColor))
+            {
+                query = query.Where(c => c.Specifications.Any(s => s.ExteriorColor == exteriorColor));
+            }
+
+            // Apply Features Filter
+            if (features != null && features.Any())
+            {
+                foreach (var featureName in features)
+                {
+                    // Ensure that ALL selected features are present for a car
+                    query = query.Where(c => c.CarListingFeatures.Any(clf => clf.Feature.Name == featureName));
+                }
+            }
+
+
+            var cars = await query
+                .Select(c => new
+                {
+                    c.ListingId,
+                    c.ModelId,
+                    c.UserId,
+                    c.Year,
+                    c.Mileage,
+                    c.Price,
+                    c.Location,
+                    c.Condition,
+                    c.ListingStatus,
+                    c.DatePosted,
+                    Model = new
+                    {
+                        c.Model.ModelId,
+                        c.Model.Name,
+                        Manufacturer = new
+                        {
+                            c.Model.Manufacturer.ManufacturerId,
+                            c.Model.Manufacturer.Name
+                        }
+                    },
+                    Specifications = c.Specifications != null ? c.Specifications.Select(s => new
+                    {
+                        s.SpecificationId,
+                        s.Engine,
+                        s.Transmission,
+                        s.FuelType,
+                        s.SeatingCapacity,
+                        s.InteriorColor,
+                        s.ExteriorColor,
+                        s.CarType,
+                    }).ToList() : null,
+                    Images = c.CarImages != null ? c.CarImages.Select(i => new
+                    {
+                        i.ImageId,
+                        i.Url,
+                        i.Filename
+                    }) : null,
+                    Features = c.CarListingFeatures != null ? c.CarListingFeatures.Select(f => new
+                    {
+                        f.Feature.FeatureId,
+                        f.Feature.Name
+                    }) : null,
+                    ServiceHistory = c.CarServiceHistories != null ? c.CarServiceHistories.Select(sh => new
+                    {
+                        sh.RecentServicing,
+                        sh.NoAccidentHistory,
+                        sh.Modifications
+                    }) : null,
+                    Pricing = c.CarPricingDetails != null ? c.CarPricingDetails.Select(
+                        shh => new
+                        {
+                            shh.TaxRate,
+                            shh.RegistrationFee,
+                        }
+                        ).ToList() : null,
+                    SalesHistory = c.CarSales != null ? c.CarSales.Select(s => new
+                    {
+                        s.SaleId,
+                        s.FinalPrice,
+                        s.SaleDate,
+                        s.SaleStatus.StatusName
+                    }) : null,
+                    Reviews = c.Reviews != null ? c.Reviews.Select(r => new
+                    {
+                        r.ReviewId,
+                        r.UserId,
+                        r.Rating,
+                        r.User.FullName,
+                        r.CreatedAt
+                    }) : null
+                })
+                .ToListAsync();
+
             return Ok(cars);
         }
-
-        // 5. Xem chi tiết xe
         [HttpGet("cars/{id}")]
         public async Task<IActionResult> GetCarDetail(int id)
         {
-            var car = await _context.CarListings.FindAsync(id);
-            return car == null ? NotFound() : Ok(car);
+            var car = await _context.CarListings
+                .Include(c => c.Model)
+                .ThenInclude(m => m.Manufacturer)
+                .Include(c => c.Specifications)
+                .Include(c => c.CarImages)
+                .Include(c => c.CarListingFeatures)
+                .Include(c => c.CarServiceHistories)
+                .Include(c => c.CarPricingDetails)
+                .Include(c => c.CarSales)
+                .Include(c => c.Reviews)
+                .ThenInclude(r => r.User)
+                .FirstOrDefaultAsync(c => c.ListingId == id);
+
+            if (car == null)
+                return NotFound();
+
+            var carDetail = new
+            {
+                car.ListingId,
+                car.ModelId,
+                car.UserId,
+                car.Year,
+                car.Mileage,
+                car.Price,
+                car.Location,
+                car.Condition,
+                car.ListingStatus,
+                car.DatePosted,
+                Model = new
+                {
+                    car.Model.ModelId,
+                    car.Model.Name,
+                    Manufacturer = new
+                    {
+                        car.Model.Manufacturer.ManufacturerId,
+                        car.Model.Manufacturer.Name
+                    }
+                },
+                Specification = car.Specifications != null ? car.Specifications.Select(s => new
+
+                    {
+                        s.SpecificationId,
+                        s.Engine,
+                        s.Transmission,
+                        s.FuelType,
+                        s.SeatingCapacity,
+                        s.InteriorColor,
+                        s.ExteriorColor,
+                        s.CarType
+                    }).ToList() : null,
+                Images = car.CarImages != null ? car.CarImages.Select(i => new
+                {
+                    i.ImageId,
+                    i.Url,
+                    i.Filename
+                }) : null,
+                Features = car.CarListingFeatures != null ? car.CarListingFeatures.Select(f => new
+                {
+                    f.Feature.FeatureId,
+                    f.Feature.Name
+                }) : null,
+                ServiceHistory = car.CarServiceHistories != null ? car.CarServiceHistories.Select(sh => new
+                {
+                    sh.RecentServicing,
+                    sh.NoAccidentHistory,
+                    sh.Modifications
+                }) : null,
+                Pricing = car.CarPricingDetails != null ? car.CarPricingDetails.Select(shh => new
+                    {
+                        shh.TaxRate,
+                        shh.RegistrationFee
+                    }).ToList() : null,
+                SalesHistory = car.CarSales != null ? car.CarSales.Select(s => new
+                {
+                    s.SaleId,
+                    s.FinalPrice,
+                    s.SaleDate,
+                    s.SaleStatus.StatusName
+                }) : null,
+                Reviews = car.Reviews != null ? car.Reviews.Select(r => new
+                {
+                    r.ReviewId,
+                    r.UserId,
+                    r.Rating,
+                    r.User.FullName,
+                    r.CreatedAt
+                }) : null
+            };
+
+            return Ok(carDetail);
         }
 
+        // 5. Xem chi tiết xe
         // 6. Đặt xe (tạo đơn hàng)
         [HttpPost("orders")]
         public async Task<IActionResult> CreateOrder([FromBody] CarSale model)
