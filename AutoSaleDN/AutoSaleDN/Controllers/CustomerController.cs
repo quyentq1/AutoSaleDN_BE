@@ -311,15 +311,17 @@ namespace AutoSaleDN.Controllers
         {
             var car = await _context.CarListings
                 .Include(c => c.Model)
-                .ThenInclude(m => m.Manufacturer)
+                    .ThenInclude(m => m.Manufacturer)
                 .Include(c => c.Specifications)
                 .Include(c => c.CarImages)
                 .Include(c => c.CarListingFeatures)
+                    .ThenInclude(clf => clf.Feature)
                 .Include(c => c.CarServiceHistories)
                 .Include(c => c.CarPricingDetails)
                 .Include(c => c.CarSales)
+                    .ThenInclude(clf => clf.SaleStatus)
                 .Include(c => c.Reviews)
-                .ThenInclude(r => r.User)
+                    .ThenInclude(r => r.User)
                 .FirstOrDefaultAsync(c => c.ListingId == id);
 
             if (car == null)
