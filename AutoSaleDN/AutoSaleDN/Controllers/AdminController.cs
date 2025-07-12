@@ -3,6 +3,8 @@ using Microsoft.EntityFrameworkCore;
 using AutoSaleDN.Models;
 using BCrypt.Net;
 using Microsoft.AspNetCore.Authorization;
+using AutoSaleDN.DTO;
+using System.Reflection;
 
 namespace AutoSaleDN.Controllers
 {
@@ -21,7 +23,8 @@ namespace AutoSaleDN.Controllers
         {
             var customers = await _context.Users
                 .Where(u => u.Role == "Customer")
-                .Select(u => new {
+                .Select(u => new
+                {
                     u.UserId,
                     u.Name,
                     u.Email,
@@ -38,7 +41,8 @@ namespace AutoSaleDN.Controllers
         {
             var user = await _context.Users
                 .Where(u => u.UserId == id && u.Role == "Customer")
-                .Select(u => new {
+                .Select(u => new
+                {
                     u.UserId,
                     u.Name,
                     u.Email,
@@ -56,7 +60,8 @@ namespace AutoSaleDN.Controllers
             // Get sales transaction history for this customer (as buyer)
             var transactions = await (
                 from sale in _context.CarSales
-                join listing in _context.CarListings on sale.ListingId equals listing.ListingId
+                join storelisting in _context.StoreListings on sale.StoreListingId equals storelisting.StoreListingId
+                join listing in _context.CarListings on storelisting.ListingId equals listing.ListingId
                 join model in _context.CarModels on listing.ModelId equals model.ModelId
                 join manu in _context.CarManufacturers on model.ManufacturerId equals manu.ManufacturerId
                 join status in _context.SaleStatus on sale.SaleStatusId equals status.SaleStatusId
@@ -75,7 +80,6 @@ namespace AutoSaleDN.Controllers
                         listing.Year,
                         listing.Mileage,
                         listing.Price,
-                        listing.Location,
                         listing.Condition,
                         listing.RentSell
                     },
@@ -164,7 +168,6 @@ namespace AutoSaleDN.Controllers
                     listing.Year,
                     listing.Mileage,
                     listing.Price,
-                    listing.Location,
                     listing.Condition,
                     listing.RentSell,
                     listing.Vin,
@@ -184,17 +187,16 @@ namespace AutoSaleDN.Controllers
         {
             var car = await _context.CarListings
                 .Where(c => c.ListingId == id)
-                .Select(c => new {
+                .Select(c => new
+                {
                     c.ListingId,
                     c.ModelId,
                     c.UserId,
                     c.Year,
                     c.Mileage,
                     c.Price,
-                    c.Location,
                     c.Condition,
                     c.RentSell,
-                    c.ListingStatus,
                     c.DatePosted,
                     c.DateUpdated
                 }).FirstOrDefaultAsync();
@@ -215,7 +217,6 @@ namespace AutoSaleDN.Controllers
                 Year = dto.Year,
                 Mileage = dto.Mileage,
                 Price = dto.Price,
-                Location = dto.Location,
                 Condition = dto.Condition,
                 RentSell = dto.RentSell,
                 Description = dto.Description,
@@ -223,7 +224,6 @@ namespace AutoSaleDN.Controllers
                 Vin = dto.Vin,
                 DatePosted = DateTime.Now,
                 DateUpdated = DateTime.Now,
-                ListingStatus = "Available"
             };
             _context.CarListings.Add(car);
             await _context.SaveChangesAsync();
@@ -251,19 +251,6 @@ namespace AutoSaleDN.Controllers
             };
             _context.CarPricingDetails.Add(pricing);
 
-            // 4. CarInventory
-            var inventory = new CarInventory
-            {
-                ModelId = dto.ModelId,
-                ColorId = dto.ColorId,
-                QuantityImported = dto.QuantityImported,
-                QuantityAvailable = dto.QuantityImported,
-                QuantitySold = 0,
-                ImportDate = dto.ImportDate,
-                ImportPrice = dto.ImportPrice,
-                Notes = dto.Notes
-            };
-            _context.CarInventories.Add(inventory);
 
             // 5. CarImages
             foreach (var url in dto.ImageUrls)
@@ -301,10 +288,8 @@ namespace AutoSaleDN.Controllers
             car.Year = model.Year;
             car.Mileage = model.Mileage;
             car.Price = model.Price;
-            car.Location = model.Location;
             car.Condition = model.Condition;
             car.RentSell = model.RentSell;
-            car.ListingStatus = model.ListingStatus ?? car.ListingStatus;
             car.DateUpdated = DateTime.UtcNow;
             car.Certified = model.Certified;
             car.Vin = model.Vin;
@@ -324,63 +309,6 @@ namespace AutoSaleDN.Controllers
             await _context.SaveChangesAsync();
             return Ok(new { message = "Car deleted successfully" });
         }
-        [HttpGet("transactions/{id}")]
-        public async Task<ActionResult<object>> GetTransactionDetail(int id)
-        {
-            var transaction = await (
-                from sale in _context.CarSales
-                join listing in _context.CarListings on sale.ListingId equals listing.ListingId
-                join model in _context.CarModels on listing.ModelId equals model.ModelId
-                join manu in _context.CarManufacturers on model.ManufacturerId equals manu.ManufacturerId
-                join status in _context.SaleStatus on sale.SaleStatusId equals status.SaleStatusId
-                join customer in _context.Users on listing.UserId equals customer.UserId
-                from spec in _context.CarSpecifications.Where(x => x.ListingId == listing.ListingId).DefaultIfEmpty()
-                where sale.SaleId == id
-                select new
-                {
-                    sale.SaleId,
-                    sale.SaleDate,
-                    sale.FinalPrice,
-                    SaleStatus = status.StatusName,
-                    CreatedAt = sale.CreatedAt,
-                    UpdatedAt = sale.UpdatedAt,
-                    Customer = new
-                    {
-                        customer.UserId,
-                        customer.FullName,
-                        customer.Email,
-                        customer.Mobile,
-                        customer.Role
-                    },
-                    Car = new
-                    {
-                        listing.ListingId,
-                        Manufacturer = manu.Name,
-                        Model = model.Name,
-                        listing.Year,
-                        listing.Mileage,
-                        listing.Price,
-                        listing.Location,
-                        listing.Condition,
-                        listing.RentSell,
-                        Vin = listing.Vin,
-                        Description = listing.Description,
-                        Certified = listing.Certified,
-                        Color = spec.ExteriorColor,
-                        Transmission = spec.Transmission,
-                        Images = _context.CarImages
-                            .Where(img => img.ListingId == listing.ListingId)
-                            .Select(img => img.Url)
-                            .ToList()
-                    }
-                }
-            ).FirstOrDefaultAsync();
-
-            if (transaction == null)
-                return NotFound();
-
-            return Ok(transaction);
-        }
 
         [HttpGet("cars/add-form-data")]
         public async Task<IActionResult> GetAddCarFormData()
@@ -390,7 +318,8 @@ namespace AutoSaleDN.Controllers
             var features = await _context.CarFeatures.ToListAsync();
             return Ok(new
             {
-                models = models.Select(m => new {
+                models = models.Select(m => new
+                {
                     m.ModelId,
                     m.Name,
                     ManufacturerName = m.Manufacturer.Name
@@ -400,7 +329,7 @@ namespace AutoSaleDN.Controllers
             });
         }
 
-        
+
 
         public class AddCarDto
         {
@@ -434,242 +363,407 @@ namespace AutoSaleDN.Controllers
         }
 
         // 1. Quản lý nhân viên (Seller)
-[HttpGet("employees")]
-public async Task<IActionResult> GetEmployees()
-{
-    var employees = await _context.Users
-        .Where(u => u.Role == "Seller")
-        .Select(u => new {
-            u.UserId, u.Name, u.Email, u.FullName, u.Mobile, u.Role, u.CreatedAt, u.UpdatedAt
-        }).ToListAsync();
-    return Ok(employees);
-}
+        [HttpGet("employees")]
+        public async Task<IActionResult> GetEmployees()
+        {
+            var employees = await _context.Users
+                .Where(u => u.Role == "Seller")
+                .Select(u => new
+                {
+                    u.UserId,
+                    u.Name,
+                    u.Email,
+                    u.FullName,
+                    u.Mobile,
+                    u.Role,
+                    u.CreatedAt,
+                    u.UpdatedAt
+                }).ToListAsync();
+            return Ok(employees);
+        }
 
-[HttpGet("employees/{id}")]
-public async Task<IActionResult> GetEmployee(int id)
-{
-    var employee = await _context.Users
-        .Where(u => u.UserId == id && u.Role == "Seller")
-        .Select(u => new {
-            u.UserId, u.Name, u.Email, u.FullName, u.Mobile, u.Role, u.CreatedAt, u.UpdatedAt
-        }).FirstOrDefaultAsync();
-    if (employee == null) return NotFound();
-    return Ok(employee);
-}
+        [HttpGet("employees/{id}")]
+        public async Task<IActionResult> GetEmployee(int id)
+        {
+            var employee = await _context.Users
+                .Where(u => u.UserId == id && u.Role == "Seller")
+                .Select(u => new
+                {
+                    u.UserId,
+                    u.Name,
+                    u.Email,
+                    u.FullName,
+                    u.Mobile,
+                    u.Role,
+                    u.CreatedAt,
+                    u.UpdatedAt
+                }).FirstOrDefaultAsync();
+            if (employee == null) return NotFound();
+            return Ok(employee);
+        }
 
-[HttpPost("employees")]
-public async Task<IActionResult> CreateEmployee([FromBody] User model)
-{
-    if (await _context.Users.AnyAsync(x => x.Email == model.Email || x.Name == model.Name))
-        return BadRequest("Email or Username already exists.");
+        [HttpPost("employees")]
+        public async Task<IActionResult> CreateEmployee([FromBody] User model)
+        {
+            if (await _context.Users.AnyAsync(x => x.Email == model.Email || x.Name == model.Name))
+                return BadRequest("Email or Username already exists.");
 
-    var employee = new User
-    {
-        Name = model.Name,
-        Email = model.Email,
-        FullName = model.FullName,
-        Mobile = model.Mobile,
-        Role = "Seller",
-        Password = BCrypt.Net.BCrypt.HashPassword(model.Password),
-        CreatedAt = DateTime.UtcNow,
-        UpdatedAt = DateTime.UtcNow
-    };
-    _context.Users.Add(employee);
-    await _context.SaveChangesAsync();
-    return Ok(new { message = "Employee created successfully" });
-}
+            var employee = new User
+            {
+                Name = model.Name,
+                Email = model.Email,
+                FullName = model.FullName,
+                Mobile = model.Mobile,
+                Role = "Seller",
+                Password = BCrypt.Net.BCrypt.HashPassword(model.Password),
+                CreatedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow
+            };
+            _context.Users.Add(employee);
+            await _context.SaveChangesAsync();
+            return Ok(new { message = "Employee created successfully" });
+        }
 
-[HttpPut("employees/{id}")]
-public async Task<IActionResult> UpdateEmployee(int id, [FromBody] User model)
-{
-    var user = await _context.Users.FirstOrDefaultAsync(u => u.UserId == id && u.Role == "Seller");
-    if (user == null) return NotFound();
+        [HttpPut("employees/{id}")]
+        public async Task<IActionResult> UpdateEmployee(int id, [FromBody] User model)
+        {
+            var user = await _context.Users.FirstOrDefaultAsync(u => u.UserId == id && u.Role == "Seller");
+            if (user == null) return NotFound();
 
-    user.FullName = model.FullName;
-    user.Email = model.Email;
-    user.Mobile = model.Mobile;
-    user.UpdatedAt = DateTime.UtcNow;
-    if (!string.IsNullOrWhiteSpace(model.Password))
-        user.Password = BCrypt.Net.BCrypt.HashPassword(model.Password);
+            user.FullName = model.FullName;
+            user.Email = model.Email;
+            user.Mobile = model.Mobile;
+            user.UpdatedAt = DateTime.UtcNow;
+            if (!string.IsNullOrWhiteSpace(model.Password))
+                user.Password = BCrypt.Net.BCrypt.HashPassword(model.Password);
 
-    await _context.SaveChangesAsync();
-    return Ok(new { message = "Employee updated successfully" });
-}
+            await _context.SaveChangesAsync();
+            return Ok(new { message = "Employee updated successfully" });
+        }
 
-[HttpDelete("employees/{id}")]
-public async Task<IActionResult> DeleteEmployee(int id)
-{
-    var user = await _context.Users.FirstOrDefaultAsync(u => u.UserId == id && u.Role == "Seller");
-    if (user == null) return NotFound();
+        [HttpDelete("employees/{id}")]
+        public async Task<IActionResult> DeleteEmployee(int id)
+        {
+            var user = await _context.Users.FirstOrDefaultAsync(u => u.UserId == id && u.Role == "Seller");
+            if (user == null) return NotFound();
 
-    _context.Users.Remove(user);
-    await _context.SaveChangesAsync();
-    return Ok(new { message = "Employee deleted successfully" });
-}
+            _context.Users.Remove(user);
+            await _context.SaveChangesAsync();
+            return Ok(new { message = "Employee deleted successfully" });
+        }
 
-// 2. Quản lý địa điểm cửa hàng
-[HttpGet("locations")]
-public async Task<IActionResult> GetStoreLocations()
-{
-    var locations = await _context.StoreLocations.ToListAsync();
-    return Ok(locations);
-}
+        // 2. Quản lý địa điểm cửa hàng
+        [HttpGet("locations")]
+        public async Task<IActionResult> GetStoreLocations()
+        {
+            var locations = await _context.StoreLocations.ToListAsync();
+            return Ok(locations);
+        }
 
-[HttpPost("locations")]
-public async Task<IActionResult> AddStoreLocation([FromBody] StoreLocation model)
-{
-    _context.StoreLocations.Add(model);
-    await _context.SaveChangesAsync();
-    return Ok(new { message = "Store location added successfully" });
-}
+        [HttpPost("locations")]
+        public async Task<IActionResult> AddStoreLocation([FromBody] StoreLocation model)
+        {
+            _context.StoreLocations.Add(model);
+            await _context.SaveChangesAsync();
+            return Ok(new { message = "Store location added successfully" });
+        }
 
-[HttpPut("locations/{id}")]
-public async Task<IActionResult> UpdateStoreLocation(int id, [FromBody] StoreLocation model)
-{
-    var location = await _context.StoreLocations.FindAsync(id);
-    if (location == null) return NotFound();
+        [HttpPut("locations/{id}")]
+        public async Task<IActionResult> UpdateStoreLocation(int id, [FromBody] StoreLocation model)
+        {
+            var location = await _context.StoreLocations.FindAsync(id);
+            if (location == null) return NotFound();
 
-    location.Name = model.Name;
-    location.Address = model.Address;
-    location.UpdatedAt = DateTime.UtcNow;
-    await _context.SaveChangesAsync();
-    return Ok(new { message = "Store location updated successfully" });
-}
+            location.Name = model.Name;
+            location.Address = model.Address;
+            location.UpdatedAt = DateTime.UtcNow;
+            await _context.SaveChangesAsync();
+            return Ok(new { message = "Store location updated successfully" });
+        }
 
-// 3. Quản lý khuyến mãi
-[HttpGet("promotions")]
-public async Task<IActionResult> GetPromotions()
-{
-    var promotions = await _context.Promotions.ToListAsync();
-    return Ok(promotions);
-}
+        // 3. Quản lý khuyến mãi
+        [HttpGet("promotions")]
+        public async Task<IActionResult> GetPromotions()
+        {
+            var promotions = await _context.Promotions.ToListAsync();
+            return Ok(promotions);
+        }
 
-[HttpPost("promotions")]
-public async Task<IActionResult> AddPromotion([FromBody] Promotion model)
-{
-    model.CreatedAt = DateTime.UtcNow;
-    _context.Promotions.Add(model);
-    await _context.SaveChangesAsync();
-    return Ok(new { message = "Promotion added successfully" });
-}
+        [HttpPost("promotions")]
+        public async Task<IActionResult> AddPromotion([FromBody] Promotion model)
+        {
+            model.CreatedAt = DateTime.UtcNow;
+            _context.Promotions.Add(model);
+            await _context.SaveChangesAsync();
+            return Ok(new { message = "Promotion added successfully" });
+        }
 
-[HttpPut("promotions/{id}")]
-public async Task<IActionResult> UpdatePromotion(int id, [FromBody] Promotion model)
-{
-    var promo = await _context.Promotions.FindAsync(id);
-    if (promo == null) return NotFound();
+        [HttpPut("promotions/{id}")]
+        public async Task<IActionResult> UpdatePromotion(int id, [FromBody] Promotion model)
+        {
+            var promo = await _context.Promotions.FindAsync(id);
+            if (promo == null) return NotFound();
 
-    promo.Title = model.Title;
-    promo.Description = model.Description;
-    promo.DiscountAmount = model.DiscountAmount;
-    promo.StartDate = model.StartDate;
-    promo.EndDate = model.EndDate;
-    promo.UpdatedAt = DateTime.UtcNow;
-    await _context.SaveChangesAsync();
-    return Ok(new { message = "Promotion updated successfully" });
-}
+            promo.Title = model.Title;
+            promo.Description = model.Description;
+            promo.DiscountAmount = model.DiscountAmount;
+            promo.StartDate = model.StartDate;
+            promo.EndDate = model.EndDate;
+            promo.UpdatedAt = DateTime.UtcNow;
+            await _context.SaveChangesAsync();
+            return Ok(new { message = "Promotion updated successfully" });
+        }
 
-[HttpDelete("promotions/{id}")]
-public async Task<IActionResult> DeletePromotion(int id)
-{
-    var promo = await _context.Promotions.FindAsync(id);
-    if (promo == null) return NotFound();
+        [HttpDelete("promotions/{id}")]
+        public async Task<IActionResult> DeletePromotion(int id)
+        {
+            var promo = await _context.Promotions.FindAsync(id);
+            if (promo == null) return NotFound();
 
-    _context.Promotions.Remove(promo);
-    await _context.SaveChangesAsync();
-    return Ok(new { message = "Promotion deleted successfully" });
-}
+            _context.Promotions.Remove(promo);
+            await _context.SaveChangesAsync();
+            return Ok(new { message = "Promotion deleted successfully" });
+        }
 
-// 4. Quản lý blog (BlogPost)
-[HttpGet("blog-posts")]
-public async Task<IActionResult> GetBlogPosts()
-{
-    var posts = await _context.BlogPosts
-        .Include(p => p.Category)
-        .Select(p => new {
-            p.PostId,
-            p.Title,
-            p.Slug,
-            p.Content,
-            p.IsPublished,
-            p.PublishedDate,
-            p.CreatedAt,
-            p.UpdatedAt,
-            Category = new { p.CategoryId, p.Category.Name },
-            p.UserId
-        }).ToListAsync();
-    return Ok(posts);
-}
+        // 4. Quản lý blog (BlogPost)
+        [HttpGet("blog-posts")]
+        public async Task<IActionResult> GetBlogPosts()
+        {
+            var posts = await _context.BlogPosts
+                .Include(p => p.Category)
+                .Select(p => new
+                {
+                    p.PostId,
+                    p.Title,
+                    p.Slug,
+                    p.Content,
+                    p.IsPublished,
+                    p.PublishedDate,
+                    p.CreatedAt,
+                    p.UpdatedAt,
+                    Category = new { p.CategoryId, p.Category.Name },
+                    p.UserId
+                }).ToListAsync();
+            return Ok(posts);
+        }
 
-[HttpPost("blog-posts")]
-public async Task<IActionResult> AddBlogPost([FromBody] BlogPost model)
-{
-    model.CreatedAt = DateTime.UtcNow;
-    model.UpdatedAt = DateTime.UtcNow;
-    _context.BlogPosts.Add(model);
-    await _context.SaveChangesAsync();
-    return Ok(new { message = "Blog post added successfully" });
-}
+        [HttpPost("blog-posts")]
+        public async Task<IActionResult> AddBlogPost([FromBody] BlogPost model)
+        {
+            model.CreatedAt = DateTime.UtcNow;
+            model.UpdatedAt = DateTime.UtcNow;
+            _context.BlogPosts.Add(model);
+            await _context.SaveChangesAsync();
+            return Ok(new { message = "Blog post added successfully" });
+        }
 
-[HttpPut("blog-posts/{id}")]
-public async Task<IActionResult> UpdateBlogPost(int id, [FromBody] BlogPost model)
-{
-    var post = await _context.BlogPosts.FindAsync(id);
-    if (post == null) return NotFound();
+        [HttpPut("blog-posts/{id}")]
+        public async Task<IActionResult> UpdateBlogPost(int id, [FromBody] BlogPost model)
+        {
+            var post = await _context.BlogPosts.FindAsync(id);
+            if (post == null) return NotFound();
 
-    post.Title = model.Title;
-    post.Slug = model.Slug;
-    post.Content = model.Content;
-    post.CategoryId = model.CategoryId;
-    post.IsPublished = model.IsPublished;
-    post.PublishedDate = model.PublishedDate;
-    post.UpdatedAt = DateTime.UtcNow;
-    await _context.SaveChangesAsync();
-    return Ok(new { message = "Blog post updated successfully" });
-}
+            post.Title = model.Title;
+            post.Slug = model.Slug;
+            post.Content = model.Content;
+            post.CategoryId = model.CategoryId;
+            post.IsPublished = model.IsPublished;
+            post.PublishedDate = model.PublishedDate;
+            post.UpdatedAt = DateTime.UtcNow;
+            await _context.SaveChangesAsync();
+            return Ok(new { message = "Blog post updated successfully" });
+        }
 
-[HttpDelete("blog-posts/{id}")]
-public async Task<IActionResult> DeleteBlogPost(int id)
-{
-    var post = await _context.BlogPosts.FindAsync(id);
-    if (post == null) return NotFound();
+        [HttpDelete("blog-posts/{id}")]
+        public async Task<IActionResult> DeleteBlogPost(int id)
+        {
+            var post = await _context.BlogPosts.FindAsync(id);
+            if (post == null) return NotFound();
 
-    _context.BlogPosts.Remove(post);
-    await _context.SaveChangesAsync();
-    return Ok(new { message = "Blog post deleted successfully" });
-}
+            _context.BlogPosts.Remove(post);
+            await _context.SaveChangesAsync();
+            return Ok(new { message = "Blog post deleted successfully" });
+        }
 
-// 5. Báo cáo doanh thu theo ngày/tháng/năm
-[HttpGet("reports/revenue/daily")]
-public async Task<IActionResult> GetDailyRevenueReport(DateTime? date = null)
-{
-    var targetDate = date?.Date ?? DateTime.UtcNow.Date;
-    var sales = await _context.CarSales
-        .Where(s => s.SaleDate.HasValue && s.SaleDate.Value.Date == targetDate)
-        .SumAsync(s => (decimal?)s.FinalPrice) ?? 0;
-    return Ok(new { date = targetDate, totalRevenue = sales });
-}
+        // 5. Báo cáo doanh thu theo ngày/tháng/năm
+        [HttpGet("reports/revenue/daily")]
+        public async Task<IActionResult> GetDailyRevenueReport(DateTime? date = null)
+        {
+            var targetDate = date?.Date ?? DateTime.UtcNow.Date;
+            var sales = await _context.CarSales
+                .Where(s => s.SaleDate.HasValue && s.SaleDate.Value.Date == targetDate)
+                .SumAsync(s => (decimal?)s.FinalPrice) ?? 0;
+            return Ok(new { date = targetDate, totalRevenue = sales });
+        }
 
-[HttpGet("reports/revenue/monthly")]
-public async Task<IActionResult> GetMonthlyRevenueReport(int? year = null, int? month = null)
-{
-    var y = year ?? DateTime.UtcNow.Year;
-    var m = month ?? DateTime.UtcNow.Month;
-    var sales = await _context.CarSales
-        .Where(s => s.SaleDate.HasValue && s.SaleDate.Value.Year == y && s.SaleDate.Value.Month == m)
-        .SumAsync(s => (decimal?)s.FinalPrice) ?? 0;
-    return Ok(new { year = y, month = m, totalRevenue = sales });
-}
+        [HttpGet("reports/revenue/monthly")]
+        public async Task<IActionResult> GetMonthlyRevenueReport(int? year = null, int? month = null)
+        {
+            var y = year ?? DateTime.UtcNow.Year;
+            var m = month ?? DateTime.UtcNow.Month;
+            var sales = await _context.CarSales
+                .Where(s => s.SaleDate.HasValue && s.SaleDate.Value.Year == y && s.SaleDate.Value.Month == m)
+                .SumAsync(s => (decimal?)s.FinalPrice) ?? 0;
+            return Ok(new { year = y, month = m, totalRevenue = sales });
+        }
 
-[HttpGet("reports/revenue/yearly")]
-public async Task<IActionResult> GetYearlyRevenueReport(int? year = null)
-{
-    var y = year ?? DateTime.UtcNow.Year;
-    var sales = await _context.CarSales
-        .Where(s => s.SaleDate.HasValue && s.SaleDate.Value.Year == y)
-        .SumAsync(s => (decimal?)s.FinalPrice) ?? 0;
-    return Ok(new { year = y, totalRevenue = sales });
-}
-    }
+        [HttpGet("reports/revenue/yearly")]
+        public async Task<IActionResult> GetYearlyRevenueReport(int? year = null)
+        {
+            var y = year ?? DateTime.UtcNow.Year;
+            var sales = await _context.CarSales
+                .Where(s => s.SaleDate.HasValue && s.SaleDate.Value.Year == y)
+                .SumAsync(s => (decimal?)s.FinalPrice) ?? 0;
+            return Ok(new { year = y, totalRevenue = sales });
+        }
+
+
+        [HttpGet("reports/top-selling-cars")]
+        public async Task<ActionResult<IEnumerable<TopSellingCarDto>>> GetTopSellingCars()
+        {
+            try
+            {
+                // Lấy danh sách các xe đã bán
+                var carData = await _context.CarListings
+                    .Include(cl => cl.Model)
+                    .ThenInclude(m => m.Manufacturer)
+                    .Include(cl => cl.CarImages)
+                    .Include(cl => cl.Reviews)
+                    .Include(cl => cl.CarSales)
+                    .Select(cl => new
+                    {
+                        cl.ModelId,
+                        ModelName = cl.Model.Name,
+                        ManufacturerName = cl.Model.Manufacturer.Name,
+                        Image = cl.CarImages.FirstOrDefault(),
+                        Reviews = cl.Reviews,
+                        Sales = cl.CarSales
+                    })
+                    .ToListAsync();
+
+                // Tính toán và group data
+                var topCars = carData
+                    .GroupBy(cl => new
+                    {
+                        cl.ModelId,
+                        cl.ModelName,
+                        cl.ManufacturerName
+                    })
+                    .Select(g => new TopSellingCarDto
+                    {
+                        ModelId = g.Key.ModelId,
+                        ModelName = g.Key.ModelName,
+                        ManufacturerName = g.Key.ManufacturerName,
+                        ImageUrl = g.FirstOrDefault()?.Image?.Url,
+                        TotalSold = g.Count(),
+                        Revenue = g.Sum(cl => cl.Sales.Sum(cs => cs.FinalPrice)),
+                        AverageRating = g.SelectMany(cl => cl.Reviews).Any()
+                    ? (int)g.SelectMany(cl => cl.Reviews).Average(r => r.Rating)
+                    : 0,
+                        TotalReviews = g.SelectMany(cl => cl.Reviews).Count()
+                    })
+                    .OrderByDescending(c => c.Revenue)
+                    .Take(10);
+
+                return Ok(topCars);
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, $"Internal server error: {ex.Message}");
+            }
+        }
+        [HttpGet("reports/cars-in-showroom")]
+        public async Task<ActionResult<ShowroomInventoryDto>> GetCarsInShowroom()
+        {
+            try
+            {
+                var inventory = new ShowroomInventoryDto();
+
+                var allShowrooms = await _context.StoreLocations.ToListAsync();
+
+                // Lấy tất cả store listings với thông tin liên quan
+                var storeListings = await _context.StoreListings
+                    .Include(sl => sl.StoreLocation)
+                    .Include(sl => sl.CarListing)
+                        .ThenInclude(cl => cl.Model)
+                            .ThenInclude(m => m.Manufacturer)
+                    .Where(sl => sl.Status == "IN_STOCK" && sl.RemovedDate == null)
+                    .Select(sl => new
+                    {
+                        StoreListing = sl,
+                        CurrentQuantity = sl.CurrentQuantity,
+                        AvailableQuantity = sl.AvailableQuantity,
+                        CarListing = sl.CarListing,
+                        Manufacturer = sl.CarListing.Model.Manufacturer
+                    })
+                    .ToListAsync();
+
+                foreach (var showroom in allShowrooms)
+                {
+                    var listings = storeListings
+                        .Where(sl => sl.StoreListing.StoreLocationId == showroom.StoreLocationId)
+                        .ToList();
+
+                    int totalCars = listings.Sum(sl => sl.CurrentQuantity);
+                    int availableCars = listings.Sum(sl => sl.AvailableQuantity);
+
+                    var brands = listings
+                        .GroupBy(sl => sl.Manufacturer.Name)
+                        .Select(b => new CarBrandStatsDto
+                        {
+                            BrandName = b.Key,
+                            TotalCars = b.Sum(sl => sl.CurrentQuantity),
+                            AvailableCars = b.Sum(sl => sl.AvailableQuantity),
+                            AverageCost = b.Average(sl => sl.StoreListing.AverageCost ?? 0),
+                            LastPurchasePrice = b.Max(sl => sl.StoreListing.LastPurchasePrice ?? 0)
+                        })
+                        .ToList();
+
+                    var models = listings
+                        .Select(sl => new CarModelStatsDto
+                        {
+                            ModelName = sl.CarListing.Model.Name,
+                            ManufacturerName = sl.Manufacturer.Name,
+                            CurrentQuantity = sl.CurrentQuantity,
+                            AvailableQuantity = sl.AvailableQuantity,
+                            AverageCost = sl.StoreListing.AverageCost ?? 0,
+                            LastPurchasePrice = sl.StoreListing.LastPurchasePrice ?? 0,
+                            LastImportDate = sl.StoreListing.Inventories
+                                .Where(i => i.TransactionType == 1) // Nhập hàng
+                                .OrderByDescending(i => i.TransactionDate)
+                                .Select(i => i.TransactionDate)
+                                .FirstOrDefault()
+                        })
+                        .GroupBy(m => new { m.ModelName, m.ManufacturerName })
+                        .Select(g => new CarModelStatsDto
+                        {
+                            ModelName = g.Key.ModelName,
+                            ManufacturerName = g.Key.ManufacturerName,
+                            CurrentQuantity = g.Sum(m => m.CurrentQuantity),
+                            AvailableQuantity = g.Sum(m => m.AvailableQuantity),
+                            AverageCost = g.Average(m => m.AverageCost),
+                            LastPurchasePrice = g.Max(m => m.LastPurchasePrice),
+                            LastImportDate = g.Max(m => m.LastImportDate)
+                        })
+                        .ToList();
+
+                    inventory.Showrooms[showroom.Name] = new ShowroomDetailsDto
+                    {
+                        TotalCars = totalCars,
+                        AvailableCars = availableCars,
+                        Brands = brands,
+                        Models = models
+                    };
+                }
+
+                return Ok(inventory);
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, $"Internal server error: {ex.Message}");
+            }
+        }
+
+    } 
 
 }

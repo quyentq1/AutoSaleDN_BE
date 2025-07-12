@@ -34,6 +34,8 @@ namespace AutoSaleDN.Models
         public DbSet<StoreLocation> StoreLocations { get; set; }
         public DbSet<DeliveryAddress> DeliveryAddresses { get; set; }
 
+        public DbSet<StoreListing> StoreListings { get; set; }
+
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
             // Unique constraints
@@ -97,22 +99,35 @@ namespace AutoSaleDN.Models
                 .OnDelete(DeleteBehavior.Restrict);
 
             modelBuilder.Entity<CarSale>()
-                .HasOne(cs => cs.Listing)
-                .WithMany(cl => cl.CarSales)
-                .HasForeignKey(cs => cs.ListingId)
+                .HasOne(s => s.StoreListing)
+                .WithMany(sl => sl.CarSales)
+                .HasForeignKey(s => s.StoreListingId)
                 .OnDelete(DeleteBehavior.Restrict);
 
             modelBuilder.Entity<CarSale>()
-                .HasOne(cs => cs.Booking)
-                .WithMany(b => b.CarSales)
-                .HasForeignKey(cs => cs.BookingId)
+                .HasOne(s => s.Customer)
+                .WithMany(u => u.CarSales)
+                .HasForeignKey(s => s.CustomerId)
                 .OnDelete(DeleteBehavior.Restrict);
 
             modelBuilder.Entity<CarSale>()
-                .HasOne(cs => cs.SaleStatus)
-                .WithMany(ss => ss.CarSales)
-                .HasForeignKey(cs => cs.SaleStatusId)
+                .HasOne(s => s.SaleStatus)
+                .WithMany(s => s.CarSales)
+                .HasForeignKey(s => s.SaleStatusId)
                 .OnDelete(DeleteBehavior.Restrict);
+
+            modelBuilder.Entity<StoreListing>()
+                .HasOne(sl => sl.StoreLocation)
+                .WithMany(sl => sl.StoreListings)
+                .HasForeignKey(sl => sl.StoreLocationId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            modelBuilder.Entity<StoreListing>()
+                .HasOne(sl => sl.CarListing)
+                .WithMany()
+                .HasForeignKey(sl => sl.ListingId)
+                .OnDelete(DeleteBehavior.Restrict);
+
             modelBuilder.Entity<Review>()
                 .HasOne(r => r.User)
                 .WithMany(u => u.Reviews)
@@ -130,6 +145,25 @@ namespace AutoSaleDN.Models
                 .WithOne()
                 .HasForeignKey<StoreLocation>(s => s.UserId)
                 .OnDelete(DeleteBehavior.Restrict);
+
+            modelBuilder.Entity<StoreListing>()
+                .HasOne(sl => sl.CarListing)
+                .WithMany(cl => cl.StoreListings)
+                .HasForeignKey(sl => sl.ListingId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            modelBuilder.Entity<StoreListing>()
+                .HasOne(sl => sl.StoreLocation)
+                .WithMany(s => s.StoreListings)
+                .HasForeignKey(sl => sl.StoreLocationId)
+                .OnDelete(DeleteBehavior.Cascade);
+            modelBuilder.Entity<CarInventory>()
+                .HasOne(ci => ci.StoreListing)
+                .WithMany(sl => sl.Inventories)
+                .HasForeignKey(ci => ci.StoreListingId)
+                .OnDelete(DeleteBehavior.Restrict);
+            modelBuilder.Entity<CarInventory>()
+            .HasIndex(ci => new { ci.StoreListingId, ci.TransactionDate });
         }
     }
 }

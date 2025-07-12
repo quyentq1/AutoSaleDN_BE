@@ -8,9 +8,9 @@ namespace AutoSaleDN.Models
         public string Address { get; set; }
         public DateTime CreatedAt { get; set; }
         public DateTime? UpdatedAt { get; set; }
-
-        // Liên kết với Seller
         public int UserId { get; set; }
-        public User User { get; set; } // Navigation property
+        public User User { get; set; }
+
+        public ICollection<StoreListing>? StoreListings { get; set; }
     }
 }

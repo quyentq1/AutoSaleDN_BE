@@ -31,5 +31,7 @@ namespace AutoSaleDN.Models
         public ICollection<Report> Reports { get; set; }
         public ICollection<Review> Reviews { get; set; }
         public ICollection<BlogPost> BlogPosts { get; set; }
+
+        public ICollection<CarSale> CarSales { get; set; }
     }
 }

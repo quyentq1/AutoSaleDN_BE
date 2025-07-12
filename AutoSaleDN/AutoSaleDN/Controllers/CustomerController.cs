@@ -16,7 +16,6 @@ namespace AutoSaleDN.Controllers
             _context = context;
         }
 
-        // 1. Xem & cập nhật profile
         [HttpGet("profile")]
         public async Task<IActionResult> GetProfile()
         {
@@ -39,7 +38,6 @@ namespace AutoSaleDN.Controllers
             return Ok(new { message = "Profile updated" });
         }
 
-        // 2. Đổi mật khẩu
         [HttpPut("change-password")]
         public async Task<IActionResult> ChangePassword([FromBody] ChangePasswordDto dto)
         {
@@ -52,7 +50,6 @@ namespace AutoSaleDN.Controllers
             return Ok(new { message = "Password changed" });
         }
 
-        // 3. Địa chỉ giao hàng
         [HttpGet("addresses")]
         public async Task<IActionResult> GetAddresses()
         {
@@ -98,13 +95,13 @@ namespace AutoSaleDN.Controllers
              [FromQuery] int? mileageTo = null,
              [FromQuery] string? transmission = null,
              [FromQuery] string? fuel = null,
-             [FromQuery] string? powerUnit = null, // "kW" or "hp" - you'll convert in C#
-             [FromQuery] double? powerFrom = null, // Using double for flexibility (kW/hp values)
+             [FromQuery] string? powerUnit = null,
+             [FromQuery] double? powerFrom = null,
              [FromQuery] double? powerTo = null,
              [FromQuery] string? vehicleType = null,
              [FromQuery] bool? driveType4x4 = null,
              [FromQuery] string? exteriorColor = null,
-             [FromQuery] List<string>? features = null // List to handle multiple feature parameters
+             [FromQuery] List<string>? features = null
          )
         {
             var query = _context.CarListings
@@ -129,7 +126,6 @@ namespace AutoSaleDN.Controllers
                     c.Model.Name.Contains(keyword) ||
                     c.Model.Manufacturer.Name.Contains(keyword) ||
                     c.Description.Contains(keyword) ||
-                    c.Location.Contains(keyword) ||
                     c.Year.ToString().Contains(keyword)
                 );
             }
@@ -147,19 +143,11 @@ namespace AutoSaleDN.Controllers
             }
             if (discountedCars.HasValue && discountedCars.Value)
             {
-                // Assuming you have a 'IsDiscounted' or 'DiscountAmount' property
-                // or a related table for discounts. Example:
-                // query = query.Where(c => c.HasDiscount == true);
-                // For this example, let's assume it means Price < OriginalPrice, if you track that
-                // Or you might have a dedicated property on CarListing
             }
             if (premiumPartners.HasValue && premiumPartners.Value)
             {
-                // Assuming you have a way to identify premium partners (e.g., User property)
-                // query = query.Where(c => c.User.IsPremiumPartner == true);
             }
 
-            // Apply Registration Year Filter (assuming 'Year' field is registration year)
             if (registrationFrom.HasValue)
             {
                 query = query.Where(c => c.Year >= registrationFrom.Value);
@@ -169,7 +157,6 @@ namespace AutoSaleDN.Controllers
                 query = query.Where(c => c.Year <= registrationTo.Value);
             }
 
-            // Apply Mileage Filters
             if (mileageFrom.HasValue)
             {
                 query = query.Where(c => c.Mileage >= mileageFrom.Value);
@@ -178,51 +165,38 @@ namespace AutoSaleDN.Controllers
             {
                 query = query.Where(c => c.Mileage <= mileageTo.Value);
             }
-
-            // Apply Transmission Filter (from Specifications)
             if (!string.IsNullOrEmpty(transmission))
             {
                 query = query.Where(c => c.Specifications.Any(s => s.Transmission == transmission));
             }
 
-            // Apply Fuel Type Filter (from Specifications)
             if (!string.IsNullOrEmpty(fuel))
             {
                 query = query.Where(c => c.Specifications.Any(s => s.FuelType == fuel));
             }
 
-            // Apply Power Filters (from Specifications, need to handle unit conversion if necessary)
             
 
 
-            // Apply Vehicle Type Filter (from Specifications)
             if (!string.IsNullOrEmpty(vehicleType))
             {
                 query = query.Where(c => c.Specifications.Any(s => s.CarType == vehicleType));
             }
 
-            // Apply Drive Type 4x4 Filter (assuming CarType or a specific feature indicates 4x4)
             if (driveType4x4.HasValue && driveType4x4.Value)
             {
-                // This assumes your CarType field might contain "4x4" or you have a dedicated property
-                // or a feature for 4x4. Adjust as per your data model.
-                // Example: query = query.Where(c => c.Specifications.Any(s => s.DriveType == "4x4"));
-                // Or if '4x4' is a feature:
                 query = query.Where(c => c.CarListingFeatures.Any(clf => clf.Feature.Name == "4x4"));
             }
 
-            // Apply Exterior Color Filter (from Specifications)
             if (!string.IsNullOrEmpty(exteriorColor))
             {
                 query = query.Where(c => c.Specifications.Any(s => s.ExteriorColor == exteriorColor));
             }
 
-            // Apply Features Filter
             if (features != null && features.Any())
             {
                 foreach (var featureName in features)
                 {
-                    // Ensure that ALL selected features are present for a car
                     query = query.Where(c => c.CarListingFeatures.Any(clf => clf.Feature.Name == featureName));
                 }
             }
@@ -237,9 +211,7 @@ namespace AutoSaleDN.Controllers
                     c.Year,
                     c.Mileage,
                     c.Price,
-                    c.Location,
                     c.Condition,
-                    c.ListingStatus,
                     c.DatePosted,
                     Model = new
                     {
@@ -335,9 +307,7 @@ namespace AutoSaleDN.Controllers
                 car.Year,
                 car.Mileage,
                 car.Price,
-                car.Location,
                 car.Condition,
-                car.ListingStatus,
                 car.DatePosted,
                 Model = new
                 {
@@ -403,8 +373,6 @@ namespace AutoSaleDN.Controllers
             return Ok(carDetail);
         }
 
-        // 5. Xem chi tiết xe
-        // 6. Đặt xe (tạo đơn hàng)
         [HttpPost("orders")]
         public async Task<IActionResult> CreateOrder([FromBody] CarSale model)
         {
@@ -417,7 +385,6 @@ namespace AutoSaleDN.Controllers
             return Ok(new { message = "Order created" });
         }
 
-        // 7. Xem lịch sử đơn hàng, lọc theo trạng thái
         [HttpGet("orders")]
         public async Task<IActionResult> GetOrders([FromQuery] int? statusId = null)
         {
@@ -429,7 +396,6 @@ namespace AutoSaleDN.Controllers
             return Ok(orders);
         }
 
-        // 8. Xem chi tiết đơn hàng
         [HttpGet("orders/{id}")]
         public async Task<IActionResult> GetOrderDetail(int id)
         {
@@ -438,7 +404,6 @@ namespace AutoSaleDN.Controllers
             return order == null ? NotFound() : Ok(order);
         }
 
-        // 9. Hủy đơn hàng
         [HttpPut("orders/{id}/cancel")]
         public async Task<IActionResult> CancelOrder(int id)
         {
@@ -450,7 +415,6 @@ namespace AutoSaleDN.Controllers
             return Ok(new { message = "Order cancelled" });
         }
 
-        // 10. Đánh giá xe
         [HttpPost("reviews")]
         public async Task<IActionResult> AddReview([FromBody] Review model)
         {
@@ -462,7 +426,6 @@ namespace AutoSaleDN.Controllers
             return Ok(new { message = "Review added" });
         }
 
-        // 11. Xem blog
         [HttpGet("blogs")]
         public async Task<IActionResult> GetBlogs()
         {
@@ -477,7 +440,6 @@ namespace AutoSaleDN.Controllers
             return blog == null ? NotFound() : Ok(blog);
         }
 
-        // 12. Chat (giả lập)
         [HttpGet("chats")]
         public IActionResult GetChats() => Ok(new { message = "Chat list (implement as needed)" });
 

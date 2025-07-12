@@ -13,9 +13,7 @@ namespace AutoSaleDN.Models
         public int? Year { get; set; }
         public int? Mileage { get; set; }
         public decimal? Price { get; set; }
-        public string? Location { get; set; }
         public string? Condition { get; set; }
-        public string? ListingStatus { get; set; } = "active";
         public DateTime DatePosted { get; set; } = DateTime.Now;
         public DateTime DateUpdated { get; set; } = DateTime.Now;
         public bool Certified { get; set; } = false;
@@ -31,5 +29,6 @@ namespace AutoSaleDN.Models
         public ICollection<Review>? Reviews { get; set; }
         public ICollection<CarSale>? CarSales { get; set; }
         public ICollection<Payment>? Payments { get; set; }
+        public ICollection<StoreListing>? StoreListings { get; set; }
+        }
     }
-}

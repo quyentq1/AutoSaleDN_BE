@@ -105,7 +105,6 @@ namespace AutoSaleDN.Controllers
             car.Year = model.Year;
             car.Mileage = model.Mileage;
             car.Price = model.Price;
-            car.Location = model.Location;
             car.Condition = model.Condition;
             car.RentSell = model.RentSell;
             car.Description = model.Description;
@@ -125,52 +124,8 @@ namespace AutoSaleDN.Controllers
             return Ok(new { message = "Car deleted" });
         }
 
-        // 5. Quản lý đơn hàng liên quan đến xe của mình
-        [HttpGet("orders")]
-        public async Task<IActionResult> GetOrders()
-        {
-            var userId = int.Parse(User.FindFirst("UserId").Value);
-            var orders = await _context.CarSales
-                .Include(s => s.Listing)
-                .Where(s => s.Listing.UserId == userId)
-                .ToListAsync();
-            return Ok(orders);
-        }
 
-        [HttpPut("orders/{id}/accept")]
-        public async Task<IActionResult> AcceptOrder(int id)
-        {
-            var userId = int.Parse(User.FindFirst("UserId").Value);
-            var sale = await _context.CarSales.Include(s => s.Listing)
-                .FirstOrDefaultAsync(s => s.SaleId == id && s.Listing.UserId == userId);
-            if (sale == null) return NotFound();
-            sale.SaleStatusId = 1;
-            await _context.SaveChangesAsync();
-            return Ok(new { message = "Order accepted" });
-        }
 
-        [HttpPut("orders/{id}/reject")]
-        public async Task<IActionResult> RejectOrder(int id)
-        {
-            var userId = int.Parse(User.FindFirst("UserId").Value);
-            var sale = await _context.CarSales.Include(s => s.Listing)
-                .FirstOrDefaultAsync(s => s.SaleId == id && s.Listing.UserId == userId);
-            if (sale == null) return NotFound();
-            sale.SaleStatusId = 3;
-            await _context.SaveChangesAsync();
-            return Ok(new { message = "Order rejected" });
-        }
-
-        // 6. Quản lý kho xe của mình
-        [HttpGet("inventory")]
-        public async Task<IActionResult> GetInventory()
-        {
-            var userId = int.Parse(User.FindFirst("UserId").Value);
-            var inventory = await _context.CarInventories
-                .Where(i => _context.CarListings.Any(c => c.UserId == userId && c.ModelId == i.ModelId))
-                .ToListAsync();
-            return Ok(inventory);
-        }
 
         // 7. Xem, trả lời đánh giá
         [HttpGet("reviews")]
