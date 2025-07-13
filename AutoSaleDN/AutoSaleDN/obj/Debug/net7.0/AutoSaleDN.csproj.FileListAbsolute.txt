@@ -62,9 +62,6 @@ E:\Đồ Án FPT\Nhóm Khải\AutoSaleDN_BE\AutoSaleDN\AutoSaleDN\bin\Debug\net7
 E:\Đồ Án FPT\Nhóm Khải\AutoSaleDN_BE\AutoSaleDN\AutoSaleDN\bin\Debug\net7.0\runtimes\win-arm64\native\Microsoft.Data.SqlClient.SNI.dll
 E:\Đồ Án FPT\Nhóm Khải\AutoSaleDN_BE\AutoSaleDN\AutoSaleDN\bin\Debug\net7.0\runtimes\win-x64\native\Microsoft.Data.SqlClient.SNI.dll
 E:\Đồ Án FPT\Nhóm Khải\AutoSaleDN_BE\AutoSaleDN\AutoSaleDN\bin\Debug\net7.0\runtimes\win-x86\native\Microsoft.Data.SqlClient.SNI.dll
-E:\Đồ Án FPT\Nhóm Khải\AutoSaleDN_BE\AutoSaleDN\AutoSaleDN\bin\Debug\net7.0\runtimes\win\lib\net6.0\Microsoft.Win32.SystemEvents.dll
-E:\Đồ Án FPT\Nhóm Khải\AutoSaleDN_BE\AutoSaleDN\AutoSaleDN\bin\Debug\net7.0\runtimes\unix\lib\net6.0\System.Drawing.Common.dll
-E:\Đồ Án FPT\Nhóm Khải\AutoSaleDN_BE\AutoSaleDN\AutoSaleDN\bin\Debug\net7.0\runtimes\win\lib\net6.0\System.Drawing.Common.dll
 E:\Đồ Án FPT\Nhóm Khải\AutoSaleDN_BE\AutoSaleDN\AutoSaleDN\bin\Debug\net7.0\runtimes\win\lib\net6.0\System.Runtime.Caching.dll
 E:\Đồ Án FPT\Nhóm Khải\AutoSaleDN_BE\AutoSaleDN\AutoSaleDN\bin\Debug\net7.0\runtimes\win\lib\net7.0\System.Security.Cryptography.Pkcs.dll
 E:\Đồ Án FPT\Nhóm Khải\AutoSaleDN_BE\AutoSaleDN\AutoSaleDN\bin\Debug\net7.0\runtimes\win\lib\net6.0\System.Security.Cryptography.ProtectedData.dll
@@ -84,3 +81,9 @@ E:\Đồ Án FPT\Nhóm Khải\AutoSaleDN_BE\AutoSaleDN\AutoSaleDN\obj\Debug\net7
 E:\Đồ Án FPT\Nhóm Khải\AutoSaleDN_BE\AutoSaleDN\AutoSaleDN\obj\Debug\net7.0\AutoSaleDN.pdb
 E:\Đồ Án FPT\Nhóm Khải\AutoSaleDN_BE\AutoSaleDN\AutoSaleDN\obj\Debug\net7.0\AutoSaleDN.genruntimeconfig.cache
 E:\Đồ Án FPT\Nhóm Khải\AutoSaleDN_BE\AutoSaleDN\AutoSaleDN\obj\Debug\net7.0\ref\AutoSaleDN.dll
+E:\Đồ Án FPT\Nhóm Khải\AutoSaleDN_BE\AutoSaleDN\AutoSaleDN\bin\Debug\net7.0\EPPlus.dll
+E:\Đồ Án FPT\Nhóm Khải\AutoSaleDN_BE\AutoSaleDN\AutoSaleDN\bin\Debug\net7.0\EPPlus.Interfaces.dll
+E:\Đồ Án FPT\Nhóm Khải\AutoSaleDN_BE\AutoSaleDN\AutoSaleDN\bin\Debug\net7.0\EPPlus.System.Drawing.dll
+E:\Đồ Án FPT\Nhóm Khải\AutoSaleDN_BE\AutoSaleDN\AutoSaleDN\bin\Debug\net7.0\Microsoft.IO.RecyclableMemoryStream.dll
+E:\Đồ Án FPT\Nhóm Khải\AutoSaleDN_BE\AutoSaleDN\AutoSaleDN\bin\Debug\net7.0\runtimes\win\lib\net7.0\Microsoft.Win32.SystemEvents.dll
+E:\Đồ Án FPT\Nhóm Khải\AutoSaleDN_BE\AutoSaleDN\AutoSaleDN\bin\Debug\net7.0\runtimes\win\lib\net7.0\System.Drawing.Common.dll

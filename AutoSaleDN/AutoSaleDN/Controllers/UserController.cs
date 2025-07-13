@@ -56,7 +56,13 @@ public class UserController : ControllerBase
     {
         var user = await _context.Users.SingleOrDefaultAsync(x => x.Email == model.Email);
         if (user == null || !BCrypt.Net.BCrypt.Verify(model.Password, user.Password))
+        {
             return Unauthorized("Invalid Email or password.");
+        }
+        if (!user.Status)
+        {
+            return Unauthorized("Your account has been deactivated by the administrator.");
+        }
 
         var token = GenerateJwtToken(user);
         return Ok(new
