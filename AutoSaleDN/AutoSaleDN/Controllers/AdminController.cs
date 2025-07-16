@@ -252,10 +252,120 @@ namespace AutoSaleDN.Controllers
                     u.CreatedAt,
                     u.UpdatedAt,
                     u.Province,
-                    u.Status
+                    u.Status,
+                    u.StoreLocationId
                 }).ToListAsync();
             return Ok(customers);
         }
+
+        [HttpPost("sellers")]
+        public async Task<ActionResult> CreateSeller([FromBody] SellerDto model)
+        {
+            if (string.IsNullOrWhiteSpace(model.Email) || string.IsNullOrWhiteSpace(model.Password) || string.IsNullOrWhiteSpace(model.FullName))
+            {
+                return BadRequest("Email, Full Name, and Password are required for new Seller creation.");
+            }
+
+            if (await _context.Users.AnyAsync(x => x.Email == model.Email || x.Name == model.Email))
+            {
+                return BadRequest("Email or Username already exists.");
+            }
+
+            var customer = new User
+            {
+                Name = model.Email,
+                Email = model.Email,
+                FullName = model.FullName,
+                Mobile = model.Mobile,
+                Province = model.Province,
+                Role = "Seller",
+                Password = BCrypt.Net.BCrypt.HashPassword(model.Password),
+                StoreLocationId = model.storeLocationId,
+                CreatedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow
+            };
+            _context.Users.Add(customer);
+            await _context.SaveChangesAsync();
+
+            return Ok(new { message = "Customer created successfully" });
+        }
+
+        [HttpPut("sellers/{id}")]
+        public async Task<ActionResult> UpdateSellers(int id, [FromBody] SellerDto model)
+        {
+            var seller = await _context.Users.FirstOrDefaultAsync(u => u.UserId == id && u.Role == "Seller");
+            //var showroom = await _context.S.FirstOrDefaultAsync(u => u.UserId == id && u.Role == "Seller");
+
+            if (seller == null)
+            {
+                return NotFound($"Seller with ID {id} not found.");
+            }
+
+            if (!string.IsNullOrEmpty(model.Email) && model.Email != seller.Email)
+            {
+                if (await _context.Users.AnyAsync(x => x.Email == model.Email))
+                {
+                    return BadRequest("Email already exists for another user.");
+                }
+            }
+
+            seller.FullName = model.FullName;
+            seller.Email = model.Email;
+            seller.Mobile = model.Mobile;
+            seller.Province = model.Province;
+            seller.UpdatedAt = DateTime.UtcNow;
+            seller.StoreLocationId = model.storeLocationId;
+
+            try
+            {
+                await _context.SaveChangesAsync();
+                return Ok(new { message = "Seller updated successfully" });
+            }
+            catch (DbUpdateConcurrencyException)
+            {
+                return Conflict("A concurrency error occurred. The Seller might have been updated or deleted by another user.");
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, $"Internal server error: {ex.Message}");
+            }
+        }
+
+        [HttpPut("sellers/toggle-status/{id}")]
+        public async Task<ActionResult> ToggleSellerStatus(int id, [FromBody] CustomerStatusUpdateDto model)
+        {
+            var seller = await _context.Users.FirstOrDefaultAsync(u => u.UserId == id && u.Role == "Seller");
+
+            if (seller == null)
+            {
+                return NotFound($"Customer with ID {id} not found.");
+            }
+
+            // Ensure the provided status value is valid (true/false)
+            if (model == null || !model.Status.HasValue)
+            {
+                return BadRequest("New status value is required.");
+            }
+
+            seller.Status = model.Status.Value;
+            seller.UpdatedAt = DateTime.UtcNow;
+
+            try
+            {
+                await _context.SaveChangesAsync();
+                string action = seller.Status ? "activated" : "deactivated";
+                return Ok(new { message = $"Seller account {action} successfully" });
+            }
+            catch (DbUpdateConcurrencyException)
+            {
+                return Conflict("A concurrency error occurred. The seller might have been updated or deleted by another user.");
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, $"Internal server error: {ex.Message}");
+            }
+        }
+
         [HttpGet("cars")]
         public async Task<IActionResult> GetCars()
         {
@@ -470,124 +580,8 @@ namespace AutoSaleDN.Controllers
             public List<int> FeatureIds { get; set; }
         }
 
-        // 1. Quản lý nhân viên (Seller)
-        [HttpGet("employees")]
-        public async Task<IActionResult> GetEmployees()
-        {
-            var employees = await _context.Users
-                .Where(u => u.Role == "Seller")
-                .Select(u => new
-                {
-                    u.UserId,
-                    u.Name,
-                    u.Email,
-                    u.FullName,
-                    u.Mobile,
-                    u.Role,
-                    u.CreatedAt,
-                    u.UpdatedAt
-                }).ToListAsync();
-            return Ok(employees);
-        }
-
-        [HttpGet("employees/{id}")]
-        public async Task<IActionResult> GetEmployee(int id)
-        {
-            var employee = await _context.Users
-                .Where(u => u.UserId == id && u.Role == "Seller")
-                .Select(u => new
-                {
-                    u.UserId,
-                    u.Name,
-                    u.Email,
-                    u.FullName,
-                    u.Mobile,
-                    u.Role,
-                    u.CreatedAt,
-                    u.UpdatedAt
-                }).FirstOrDefaultAsync();
-            if (employee == null) return NotFound();
-            return Ok(employee);
-        }
-
-        [HttpPost("employees")]
-        public async Task<IActionResult> CreateEmployee([FromBody] User model)
-        {
-            if (await _context.Users.AnyAsync(x => x.Email == model.Email || x.Name == model.Name))
-                return BadRequest("Email or Username already exists.");
-
-            var employee = new User
-            {
-                Name = model.Name,
-                Email = model.Email,
-                FullName = model.FullName,
-                Mobile = model.Mobile,
-                Role = "Seller",
-                Password = BCrypt.Net.BCrypt.HashPassword(model.Password),
-                CreatedAt = DateTime.UtcNow,
-                UpdatedAt = DateTime.UtcNow
-            };
-            _context.Users.Add(employee);
-            await _context.SaveChangesAsync();
-            return Ok(new { message = "Employee created successfully" });
-        }
-
-        [HttpPut("employees/{id}")]
-        public async Task<IActionResult> UpdateEmployee(int id, [FromBody] User model)
-        {
-            var user = await _context.Users.FirstOrDefaultAsync(u => u.UserId == id && u.Role == "Seller");
-            if (user == null) return NotFound();
-
-            user.FullName = model.FullName;
-            user.Email = model.Email;
-            user.Mobile = model.Mobile;
-            user.UpdatedAt = DateTime.UtcNow;
-            if (!string.IsNullOrWhiteSpace(model.Password))
-                user.Password = BCrypt.Net.BCrypt.HashPassword(model.Password);
-
-            await _context.SaveChangesAsync();
-            return Ok(new { message = "Employee updated successfully" });
-        }
-
-        [HttpDelete("employees/{id}")]
-        public async Task<IActionResult> DeleteEmployee(int id)
-        {
-            var user = await _context.Users.FirstOrDefaultAsync(u => u.UserId == id && u.Role == "Seller");
-            if (user == null) return NotFound();
-
-            _context.Users.Remove(user);
-            await _context.SaveChangesAsync();
-            return Ok(new { message = "Employee deleted successfully" });
-        }
-
-        // 2. Quản lý địa điểm cửa hàng
-        [HttpGet("locations")]
-        public async Task<IActionResult> GetStoreLocations()
-        {
-            var locations = await _context.StoreLocations.ToListAsync();
-            return Ok(locations);
-        }
-
-        [HttpPost("locations")]
-        public async Task<IActionResult> AddStoreLocation([FromBody] StoreLocation model)
-        {
-            _context.StoreLocations.Add(model);
-            await _context.SaveChangesAsync();
-            return Ok(new { message = "Store location added successfully" });
-        }
-
-        [HttpPut("locations/{id}")]
-        public async Task<IActionResult> UpdateStoreLocation(int id, [FromBody] StoreLocation model)
-        {
-            var location = await _context.StoreLocations.FindAsync(id);
-            if (location == null) return NotFound();
-
-            location.Name = model.Name;
-            location.Address = model.Address;
-            location.UpdatedAt = DateTime.UtcNow;
-            await _context.SaveChangesAsync();
-            return Ok(new { message = "Store location updated successfully" });
-        }
+        
+       
 
         // 3. Quản lý khuyến mãi
         [HttpGet("promotions")]
@@ -889,13 +883,11 @@ namespace AutoSaleDN.Controllers
         {
             try
             {
-                // Lấy dữ liệu cơ bản trước
                 var showrooms = await _context.StoreLocations
                     .Select(sl => new
                     {
                         Id = sl.StoreLocationId,
                         Name = sl.Name,
-                        SellerId = sl.UserId,
                         Location = sl.Address,
                         TotalCars = sl.StoreListings.Sum(sl => sl.CurrentQuantity),
                         SoldThisMonth = _context.CarSales
@@ -906,14 +898,19 @@ namespace AutoSaleDN.Controllers
                             .Where(s => s.StoreListing.StoreLocationId == sl.StoreLocationId
                                  && s.SaleDate >= DateTime.Now.AddMonths(-1))
                             .Sum(s => s.FinalPrice),
-                        SellerName = _context.Users
-                            .Where(u => u.UserId == sl.UserId)
-                            .Select(u => u.FullName)
-                            .FirstOrDefault()
+                        Sellers = _context.Users
+                            .Where(u => u.StoreLocationId == sl.StoreLocationId)
+                            .Select(u => new SellersDto
+                            {
+                                SellerId = u.UserId,
+                                FullName = u.FullName,
+                                Email = u.Email,
+                                PhoneNumber = u.Mobile
+                            })
+                            .ToList()
                     })
                     .ToListAsync();
 
-                // Sau đó tính toán các giá trị phức tạp
                 var result = showrooms.Select(s => new ShowroomDto
                 {
                     Id = s.Id,
@@ -922,13 +919,13 @@ namespace AutoSaleDN.Controllers
                     TotalCars = s.TotalCars,
                     SoldThisMonth = s.SoldThisMonth,
                     Revenue = s.Revenue,
-                    SellerName= s.SellerName,
+                    MainSeller = s.Sellers.FirstOrDefault(),
+                    AllSellers = s.Sellers,
                     RevenueGrowth = GetRevenueGrowth(s.Id),
                     Brands = GetBrandPerformance(s.Id),
                     SalesData = GetMonthlySalesData(s.Id),
                     Inventory = GetRecentInventory(s.Id),
-                    Models = GetPopularModels(s.Id),
-                    SellerId = s.SellerId
+                    PopularModels = GetPopularModels(s.Id)
                 }).ToList();
 
                 return Ok(result);
@@ -938,7 +935,6 @@ namespace AutoSaleDN.Controllers
                 return StatusCode(500, $"Internal server error: {ex.Message}");
             }
         }
-
         [HttpGet("showrooms/{id}")]
         public async Task<IActionResult> GetShowroomDetail(int id)
         {
@@ -953,18 +949,38 @@ namespace AutoSaleDN.Controllers
                         Location = sl.Address,
                         TotalCars = sl.StoreListings.Sum(sl => sl.CurrentQuantity),
                         SoldThisMonth = _context.CarSales
-                            .Where(s => s.StoreListing.StoreLocationId == id 
+                            .Where(s => s.StoreListing.StoreLocationId == id
                                 && s.SaleDate >= DateTime.Now.AddMonths(-1))
                             .Count(),
                         Revenue = _context.CarSales
-                            .Where(s => s.StoreListing.StoreLocationId == id 
+                            .Where(s => s.StoreListing.StoreLocationId == id
                                 && s.SaleDate >= DateTime.Now.AddMonths(-1))
                             .Sum(s => s.FinalPrice),
                         RevenueGrowth = GetRevenueGrowth(id),
                         Brands = GetBrandPerformance(id),
                         SalesData = GetMonthlySalesData(id),
                         Inventory = GetRecentInventory(id),
-                        Models = GetPopularModels(id)
+                        PopularModels = GetPopularModels(id),
+                        MainSeller = _context.Users
+                            .Where(u => u.StoreLocationId == id)
+                            .Select(u => new SellersDto
+                            {
+                                SellerId = u.UserId,
+                                FullName = u.FullName,
+                                Email = u.Email,
+                                PhoneNumber = u.Mobile
+                            })
+                            .FirstOrDefault(),
+                        AllSellers = _context.Users
+                            .Where(u => u.StoreLocationId == id)
+                            .Select(u => new SellersDto
+                            {
+                                SellerId = u.UserId,
+                                FullName = u.FullName,
+                                Email = u.Email,
+                                PhoneNumber = u.Mobile
+                            })
+                            .ToList()
                     })
                     .FirstOrDefaultAsync();
 

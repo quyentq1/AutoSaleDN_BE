@@ -1,12 +1,10 @@
 ﻿using System.ComponentModel.DataAnnotations;
-
 namespace AutoSaleDN.Models
 {
     public class User
     {
         [Key]
         public int UserId { get; set; }
-
         [Required, StringLength(50)]
         public string Name { get; set; }
         [Required, StringLength(255)]
@@ -19,13 +17,15 @@ namespace AutoSaleDN.Models
         public string? Mobile { get; set; }
         [Required, StringLength(20)]
         public string Role { get; set; }
-
         [Required, StringLength(100)]
         public string Province { get; set; }
-
         public bool Status { get; set; } = true;
         public DateTime CreatedAt { get; set; } = DateTime.Now;
         public DateTime UpdatedAt { get; set; } = DateTime.Now;
+
+        public int? StoreLocationId { get; set; }
+
+        public StoreLocation? StoreLocation { get; set; }
 
         public ICollection<CarListing> CarListings { get; set; }
         public ICollection<Booking> Bookings { get; set; }
@@ -33,7 +33,6 @@ namespace AutoSaleDN.Models
         public ICollection<Report> Reports { get; set; }
         public ICollection<Review> Reviews { get; set; }
         public ICollection<BlogPost> BlogPosts { get; set; }
-
         public ICollection<CarSale> CarSales { get; set; }
     }
 }

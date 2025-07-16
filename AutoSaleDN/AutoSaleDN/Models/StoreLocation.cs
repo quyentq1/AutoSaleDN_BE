@@ -8,9 +8,7 @@ namespace AutoSaleDN.Models
         public string Address { get; set; }
         public DateTime CreatedAt { get; set; }
         public DateTime? UpdatedAt { get; set; }
-        public int UserId { get; set; }
-        public User User { get; set; }
-
+        public ICollection<User>? Users { get; set; }
         public ICollection<StoreListing>? StoreListings { get; set; }
     }
 }

@@ -51,29 +51,6 @@ namespace AutoSaleDN.Controllers
             await _context.SaveChangesAsync();
             return Ok(new { message = "Password changed" });
         }
-
-        // 3. Quản lý cửa hàng
-        [HttpGet("store")]
-        public async Task<IActionResult> GetStore()
-        {
-            var userId = int.Parse(User.FindFirst("UserId").Value);
-            var store = await _context.StoreLocations.FirstOrDefaultAsync(s => s.UserId == userId);
-            return store == null ? NotFound() : Ok(store);
-        }
-
-        [HttpPut("store")]
-        public async Task<IActionResult> UpdateStore([FromBody] StoreLocation model)
-        {
-            var userId = int.Parse(User.FindFirst("UserId").Value);
-            var store = await _context.StoreLocations.FirstOrDefaultAsync(s => s.UserId == userId);
-            if (store == null) return NotFound();
-            store.Name = model.Name;
-            store.Address = model.Address;
-            store.UpdatedAt = DateTime.UtcNow;
-            await _context.SaveChangesAsync();
-            return Ok(new { message = "Store updated" });
-        }
-
         // 4. Quản lý xe của mình
         [HttpGet("cars")]
         public async Task<IActionResult> GetMyCars()

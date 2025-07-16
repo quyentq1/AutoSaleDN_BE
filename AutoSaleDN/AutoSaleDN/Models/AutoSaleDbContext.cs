@@ -67,7 +67,12 @@ namespace AutoSaleDN.Models
             modelBuilder.Entity<Report>().Property(r => r.TotalRevenue).HasColumnType("decimal(10,2)");
             modelBuilder.Entity<Report>().Property(r => r.AverageRating).HasColumnType("decimal(3,2)");
 
-            // Restrict Delete (prevent cascade cycles)
+            modelBuilder.Entity<User>()
+                .HasOne(u => u.StoreLocation)
+                .WithMany(sl => sl.Users)
+                .HasForeignKey(u => u.StoreLocationId)
+                .OnDelete(DeleteBehavior.SetNull);
+
             modelBuilder.Entity<Booking>()
                 .HasOne(b => b.User)
                 .WithMany(u => u.Bookings)
@@ -140,12 +145,6 @@ namespace AutoSaleDN.Models
                 .HasForeignKey(r => r.ListingId)
                 .OnDelete(DeleteBehavior.Restrict);
 
-            modelBuilder.Entity<StoreLocation>()
-                .HasOne(s => s.User)
-                .WithOne()
-                .HasForeignKey<StoreLocation>(s => s.UserId)
-                .OnDelete(DeleteBehavior.Restrict);
-
             modelBuilder.Entity<StoreListing>()
                 .HasOne(sl => sl.CarListing)
                 .WithMany(cl => cl.StoreListings)
@@ -157,11 +156,13 @@ namespace AutoSaleDN.Models
                 .WithMany(s => s.StoreListings)
                 .HasForeignKey(sl => sl.StoreLocationId)
                 .OnDelete(DeleteBehavior.Cascade);
+
             modelBuilder.Entity<CarInventory>()
                 .HasOne(ci => ci.StoreListing)
                 .WithMany(sl => sl.Inventories)
                 .HasForeignKey(ci => ci.StoreListingId)
                 .OnDelete(DeleteBehavior.Restrict);
+
             modelBuilder.Entity<CarInventory>()
             .HasIndex(ci => new { ci.StoreListingId, ci.TransactionDate });
         }
