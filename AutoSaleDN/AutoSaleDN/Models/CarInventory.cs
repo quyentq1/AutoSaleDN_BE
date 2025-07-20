@@ -9,6 +9,8 @@ namespace AutoSaleDN.Models
         [Key]
         public int ColorId { get; set; }
         public string Name { get; set; }
+
+        public bool Status { get; set; } = true;
     }
 
     public class CarInventory

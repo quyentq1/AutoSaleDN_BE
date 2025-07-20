@@ -1,4 +1,4 @@
-﻿using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using AutoSaleDN.Models;
 using BCrypt.Net;
@@ -367,37 +367,60 @@ namespace AutoSaleDN.Controllers
         }
 
         [HttpGet("cars")]
-        public async Task<IActionResult> GetCars()
+        public async Task<ActionResult<object>> GetCars([FromQuery] int page = 1, [FromQuery] int pageSize = 10, [FromQuery] string search = "")
         {
-            var cars = await (
-                from listing in _context.CarListings
-                join model in _context.CarModels on listing.ModelId equals model.ModelId
-                join manu in _context.CarManufacturers on model.ManufacturerId equals manu.ManufacturerId
-                from spec in _context.CarSpecifications.Where(x => x.ListingId == listing.ListingId).DefaultIfEmpty()
-                let available_units = _context.CarListings.Count(x => x.ModelId == listing.ModelId)
-                select new
-                {
-                    listing.ListingId,
-                    listing.ModelId,
-                    Model = model.Name,
-                    Manufacturer = manu.Name,
-                    Color = spec != null ? spec.ExteriorColor : "Unknown",
-                    listing.UserId,
-                    listing.Year,
-                    listing.Mileage,
-                    listing.Price,
-                    listing.Condition,
-                    listing.RentSell,
-                    listing.Vin,
-                    Transmission = spec != null ? spec.Transmission : "Automatic",
-                    SeatingCapacity = spec != null ? spec.SeatingCapacity : 5,
-                    Certified = listing.Certified,
-                    Images = _context.CarImages.Where(img => img.ListingId == listing.ListingId).Select(img => img.Url).ToList(),
-                    Available_Units = available_units
-                }
-            ).ToListAsync();
+            var query = _context.CarListings
+                .Include(c => c.Model)
+                    .ThenInclude(m => m.Manufacturer)
+                .Include(c => c.CarImages)
+                .Include(c => c.StoreListings)
+                    .ThenInclude(sl => sl.StoreLocation)
+                .AsQueryable();
 
-            return Ok(cars);
+            if (!string.IsNullOrEmpty(search))
+            {
+                query = query.Where(c => 
+                    c.Model.Name.Contains(search) || 
+                    c.Model.Manufacturer.Name.Contains(search));
+            }
+
+            var totalCount = await query.CountAsync();
+
+            var cars = await query
+                .Select(c => new CarDto
+                {
+                    ListingId = c.ListingId,
+                    ModelName = c.Model.Name,
+                    Manufacturer = c.Model.Manufacturer.Name,
+                    Year = c.Year ?? 0, // Handle possible null value
+                    Price = (double)(c.Price ?? 0), // Handle possible null and cast to double
+                    ImageUrl = c.CarImages.FirstOrDefault() != null ? c.CarImages.FirstOrDefault().Url : "/path/to/default-image.jpg",
+                    Status = c.StoreListings.Any(sl => sl.CurrentQuantity > 0) ? "Available" : "Unavailable",
+                    Showrooms = c.StoreListings.Select(sl => new CarInventoryDto
+                    {
+                        InventoryId = sl.StoreListingId,
+                        ListingId = sl.ListingId,
+                        ShowroomId = sl.StoreLocationId,
+                        ShowroomName = sl.StoreLocation.Name,
+                        Quantity = sl.CurrentQuantity
+                    }).ToList()
+                })
+                .OrderByDescending(c => c.ListingId)
+                .Skip((page - 1) * pageSize)
+                .Take(pageSize)
+                .ToListAsync();
+
+            return Ok(new
+            {
+                data = cars,
+                pagination = new
+                {
+                    currentPage = page,
+                    pageSize,
+                    totalCount,
+                    totalPages = (int)Math.Ceiling(totalCount / (double)pageSize)
+                }
+            });
         }
 
         [HttpGet("cars/{id}")]
@@ -518,7 +541,7 @@ namespace AutoSaleDN.Controllers
         }
 
         [HttpDelete("cars/{id}")]
-        public async Task<ActionResult> DeleteCar(int id)
+        public async Task<IActionResult> DeleteCar(int id)
         {
             var car = await _context.CarListings.FirstOrDefaultAsync(c => c.ListingId == id);
             if (car == null) return NotFound();
@@ -547,7 +570,90 @@ namespace AutoSaleDN.Controllers
             });
         }
 
+        // Showroom Allocations (CarInventory)
 
+        [HttpGet("cars/{id}/allocations")]
+        public async Task<ActionResult<IEnumerable<CarInventoryDto>>> GetCarAllocations(int id)
+        {
+            // Get allocations by querying StoreListings for a given car (ListingId)
+            var allocations = await _context.StoreListings
+                .Where(sl => sl.ListingId == id)
+                .Include(sl => sl.StoreLocation)
+                .Select(sl => new CarInventoryDto
+                {
+                    InventoryId = sl.StoreListingId,
+                    ListingId = sl.ListingId,
+                    ShowroomId = sl.StoreLocationId,
+                    ShowroomName = sl.StoreLocation.Name,
+                    Quantity = sl.CurrentQuantity
+                })
+                .ToListAsync();
+
+            return Ok(allocations);
+        }
+
+
+        [HttpPost("allocations")]
+        public async Task<IActionResult> AddOrUpdateAllocation([FromBody] CarInventoryDto allocationDto)
+        {
+            if (allocationDto.ListingId <= 0 || allocationDto.ShowroomId <= 0 || allocationDto.Quantity < 0)
+            {
+                return BadRequest(new { message = "Invalid allocation data provided." });
+            }
+            var storelisting = new StoreListing
+            {
+                StoreLocationId = allocationDto.ShowroomId,
+                ListingId = allocationDto.ListingId,
+                InitialQuantity = allocationDto.Quantity,
+                AddedDate = DateTime.UtcNow,
+                Status = "IN_STOCK"
+            };
+            _context.StoreListings.Add(storelisting);
+
+            await _context.SaveChangesAsync();
+
+            return Ok(new { message = "Allocation saved successfully." });
+        }
+
+        [HttpDelete("allocations/{storeListingId}")]
+        public async Task<IActionResult> DeleteAllocation(int storeListingId)
+        {
+            var storeListing = await _context.StoreListings.FindAsync(storeListingId);
+            if (storeListing == null)
+            {
+                return NotFound(new { message = "Showroom allocation not found." });
+            }
+
+            // Optional: You might want to check if there are associated sales before deleting.
+            // For now, we will proceed with deletion.
+
+            // Removing the StoreListing will also remove associated CarInventory records if Cascade Delete is set up in the database.
+            _context.StoreListings.Remove(storeListing);
+            await _context.SaveChangesAsync();
+
+            return Ok(new { message = "Allocation deleted successfully." });
+        }
+
+        public class CarDto
+        {
+            public int ListingId { get; set; }
+            public string ModelName { get; set; }
+            public string Manufacturer { get; set; }
+            public int Year { get; set; }
+            public double Price { get; set; }
+            public string Status { get; set; }
+            public string ImageUrl { get; set; }
+            public List<CarInventoryDto> Showrooms { get; set; }
+        }
+
+        public class CarInventoryDto
+        {
+            public int? InventoryId { get; set; }
+            public int ListingId { get; set; }
+            public int ShowroomId { get; set; }
+            public string? ShowroomName { get; set; }
+            public int Quantity { get; set; }
+        }
 
         public class AddCarDto
         {
@@ -1045,7 +1151,7 @@ namespace AutoSaleDN.Controllers
             }
         }
 
-        [HttpGet("showrooms/{id}/inventory")]
+       [HttpGet("showrooms/{id}/inventory")]
         public async Task<IActionResult> GetShowroomInventory(int id)
         {
             try
@@ -1582,6 +1688,76 @@ namespace AutoSaleDN.Controllers
         {
             public int StatusId { get; set; }
         }
-    } 
 
+        // DTO for a single item in the bulk import
+        public class StockImportItemDto
+        {
+            public int ListingId { get; set; }
+            public int Quantity { get; set; }
+        }
+
+        // DTO for the bulk import request
+        public class BulkStockImportDto
+        {
+            public List<StockImportItemDto> Items { get; set; }
+        }
+
+        [HttpPost("showrooms/{showroomId}/inventory/import")]
+        public async Task<IActionResult> BulkImportStock(int showroomId, [FromBody] BulkStockImportDto bulkImportDto)
+        {
+            if (bulkImportDto == null || bulkImportDto.Items == null || !bulkImportDto.Items.Any())
+            {
+                return BadRequest(new { message = "Invalid stock import data. The list of items cannot be empty." });
+            }
+
+            using (var transaction = await _context.Database.BeginTransactionAsync())
+            {
+                try
+                {
+                    foreach (var item in bulkImportDto.Items)
+                    {
+                        if (item.Quantity <= 0 || item.ListingId <= 0)
+                        {
+                            await transaction.RollbackAsync();
+                            return BadRequest(new { message = $"Invalid data for ListingId {item.ListingId}. Quantity must be positive." });
+                        }
+
+                        var storeListing = await _context.StoreListings
+                            .FirstOrDefaultAsync(sl => sl.StoreLocationId == showroomId && sl.ListingId == item.ListingId);
+
+                        if (storeListing == null)
+                        {
+                            await transaction.RollbackAsync();
+                            return NotFound(new { message = $"Car with ListingId {item.ListingId} is not allocated to this showroom." });
+                        }
+
+                        // Create a new inventory record for each import
+                        var inventoryLog = new CarInventory
+                        {
+                            StoreListingId = storeListing.StoreListingId,
+                            TransactionType = 1, // 5 for 'Stock Import'
+                            Quantity = item.Quantity,
+                            UnitPrice = 0, // Set appropriate price if needed
+                            ReferenceId = "INIT-002", // Set appropriate reference ID if needed
+                            Notes = $"Nhập mới {item.Quantity} đơn vị vào kho.",
+                            CreatedBy = User.Identity?.Name ?? "Admin",
+                            TransactionDate = DateTime.UtcNow,
+                            CreatedAt = DateTime.UtcNow
+                        };
+                        _context.CarInventories.Add(inventoryLog);
+                    }
+
+                    await _context.SaveChangesAsync();
+                    await transaction.CommitAsync();
+
+                    return Ok(new { message = "Nhập kho thành công." });
+                }
+                catch (Exception ex)
+                {
+                    await transaction.RollbackAsync();
+                    return StatusCode(500, new { message = "Có lỗi xảy ra trong quá trình nhập kho.", error = ex.Message });
+                }
+            }
+        }
+    }
 }

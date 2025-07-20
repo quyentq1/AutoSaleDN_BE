@@ -30,4 +30,5 @@
         public List<int> FeatureIds { get; set; }
         public int? UserId { get; set; }
     }
+
 }
