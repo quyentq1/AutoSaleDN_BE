@@ -23,6 +23,7 @@ namespace AutoSaleDN.Models
         public ICollection<CarSpecification>? Specifications { get; set; }
         public ICollection<CarListingFeature>? CarListingFeatures { get; set; }
         public ICollection<CarImage>? CarImages { get; set; }
+        public ICollection<CarVideo>? CarVideos { get; set; }
         public ICollection<Booking>? Bookings { get; set; }
         public ICollection<CarServiceHistory>? CarServiceHistories { get; set; }
         public ICollection<CarPricingDetail>? CarPricingDetails { get; set; }

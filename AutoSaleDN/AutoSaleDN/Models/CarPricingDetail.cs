@@ -1,4 +1,6 @@
-﻿using System.ComponentModel.DataAnnotations;
+﻿using Microsoft.EntityFrameworkCore.Metadata.Internal;
+using System.ComponentModel.DataAnnotations;
+using System.ComponentModel.DataAnnotations.Schema;
 
 namespace AutoSaleDN.Models
 {
@@ -8,7 +10,11 @@ namespace AutoSaleDN.Models
         public int PricingDetailId { get; set; }
         public int ListingId { get; set; }
         public CarListing Listing { get; set; }
-        public decimal TaxRate { get; set; } = 0.08M;
-        public decimal RegistrationFee { get; set; } = 300M;
+
+        [Column(TypeName = "decimal(18,2)")]
+        public decimal TaxRate { get; set; }
+
+        [Column(TypeName = "decimal(18,2)")]
+        public decimal RegistrationFee { get; set; }
     }
 }

@@ -373,29 +373,74 @@ namespace AutoSaleDN.Controllers
                 .Include(c => c.Model)
                     .ThenInclude(m => m.Manufacturer)
                 .Include(c => c.CarImages)
+                .Include(c => c.CarVideos)
+                .Include(c => c.Specifications)
+                .Include(c => c.CarPricingDetails)
+                .Include(c => c.CarListingFeatures)
+                    .ThenInclude(clf => clf.Feature)
                 .Include(c => c.StoreListings)
                     .ThenInclude(sl => sl.StoreLocation)
                 .AsQueryable();
 
             if (!string.IsNullOrEmpty(search))
             {
-                query = query.Where(c => 
-                    c.Model.Name.Contains(search) || 
-                    c.Model.Manufacturer.Name.Contains(search));
+                query = query.Where(c =>
+                    c.Model.Name.Contains(search) ||
+                    c.Model.Manufacturer.Name.Contains(search) ||
+                    (c.Specifications.Any() && c.Specifications.FirstOrDefault().ExteriorColor.Contains(search)) ||
+                    c.Vin.Contains(search)
+                );
             }
 
             var totalCount = await query.CountAsync();
 
             var cars = await query
-                .Select(c => new CarDto
+                .Select(c => new CarDetailResponseDto
                 {
                     ListingId = c.ListingId,
+                    ModelId = c.ModelId,
+                    UserId = c.UserId,
+                    Year = c.Year ?? 0,
+                    Mileage = (double)(c.Mileage ?? 0),
+                    Price = (double)(c.Price ?? 0),
+                    Condition = c.Condition,
+                    RentSell = c.RentSell,
+                    Description = c.Description,
+                    Certified = c.Certified,
+                    Vin = c.Vin,
+                    DatePosted = c.DatePosted,
+                    DateUpdated = c.DateUpdated,
+
                     ModelName = c.Model.Name,
                     Manufacturer = c.Model.Manufacturer.Name,
-                    Year = c.Year ?? 0, // Handle possible null value
-                    Price = (double)(c.Price ?? 0), // Handle possible null and cast to double
-                    ImageUrl = c.CarImages.FirstOrDefault() != null ? c.CarImages.FirstOrDefault().Url : "/path/to/default-image.jpg",
-                    Status = c.StoreListings.Any(sl => sl.CurrentQuantity > 0) ? "Available" : "Unavailable",
+
+                    // CarSpecification details (accessing FirstOrDefault from ICollection)
+                    Color = c.Specifications.Any() ? c.Specifications.FirstOrDefault().ExteriorColor : null,
+                    InteriorColor = c.Specifications.Any() ? c.Specifications.FirstOrDefault().InteriorColor : null,
+                    Transmission = c.Specifications.Any() ? c.Specifications.FirstOrDefault().Transmission : null,
+                    Engine = c.Specifications.Any() ? c.Specifications.FirstOrDefault().Engine : null,
+                    FuelType = c.Specifications.Any() ? c.Specifications.FirstOrDefault().FuelType : null,
+                    CarType = c.Specifications.Any() ? c.Specifications.FirstOrDefault().CarType : null,
+                    SeatingCapacity = c.Specifications.Any() ? c.Specifications.FirstOrDefault().SeatingCapacity : 0,
+
+                    // CarPricingDetail details (accessing FirstOrDefault from ICollection)
+                    RegistrationFee = c.CarPricingDetails.Any() ? c.CarPricingDetails.FirstOrDefault().RegistrationFee : 0,
+                    TaxRate = c.CarPricingDetails.Any() ? c.CarPricingDetails.FirstOrDefault().TaxRate : 0,
+
+                    // Image and Video URLs
+
+                    // Image and Video URLs
+                    ImageUrl = c.CarImages.Select(ci => ci.Url).ToList(),
+                    VideoUrl = c.CarVideos.Select(cv => cv.Url).ToList(),
+
+                    // Features
+                    Features = c.CarListingFeatures.Select(clf => new CarFeatureDto
+                    {
+                        FeatureId = clf.Feature.FeatureId,
+                        Name = clf.Feature.Name
+                    }).ToList(),
+
+                    // Showrooms
                     Showrooms = c.StoreListings.Select(sl => new CarInventoryDto
                     {
                         InventoryId = sl.StoreListingId,
@@ -403,7 +448,11 @@ namespace AutoSaleDN.Controllers
                         ShowroomId = sl.StoreLocationId,
                         ShowroomName = sl.StoreLocation.Name,
                         Quantity = sl.CurrentQuantity
-                    }).ToList()
+                    }).ToList(),
+
+                    // Derived Status and Available Units
+                    Status = c.StoreListings.Any(sl => sl.CurrentQuantity > 0) ? "Available" : "Unavailable",
+                    AvailableUnits = c.StoreListings.Sum(sl => (int?)sl.CurrentQuantity) ?? 0
                 })
                 .OrderByDescending(c => c.ListingId)
                 .Skip((page - 1) * pageSize)
@@ -424,99 +473,193 @@ namespace AutoSaleDN.Controllers
         }
 
         [HttpGet("cars/{id}")]
-        public async Task<ActionResult<object>> GetCar(int id)
+        public async Task<ActionResult<CarDetailResponseDto>> GetCar(int id)
         {
             var car = await _context.CarListings
                 .Where(c => c.ListingId == id)
-                .Select(c => new
+                .Include(c => c.Model)
+                    .ThenInclude(m => m.Manufacturer)
+                .Include(c => c.Specifications)
+                .Include(c => c.CarPricingDetails)
+                .Include(c => c.CarImages)
+                .Include(c => c.CarVideos)
+                .Include(c => c.CarListingFeatures)
+                    .ThenInclude(clf => clf.Feature)
+                .Include(c => c.StoreListings)
+                    .ThenInclude(sl => sl.StoreLocation)
+                .Select(c => new CarDetailResponseDto
                 {
-                    c.ListingId,
-                    c.ModelId,
-                    c.UserId,
-                    c.Year,
-                    c.Mileage,
-                    c.Price,
-                    c.Condition,
-                    c.RentSell,
-                    c.DatePosted,
-                    c.DateUpdated
-                }).FirstOrDefaultAsync();
+                    ListingId = c.ListingId,
+                    ModelId = c.ModelId,
+                    UserId = c.UserId,
+                    Year = c.Year ?? 0,
+                    Mileage = (double)(c.Mileage ?? 0),
+                    Price = (double)(c.Price ?? 0),
+                    Condition = c.Condition,
+                    RentSell = c.RentSell,
+                    Description = c.Description,
+                    Certified = c.Certified,
+                    Vin = c.Vin,
+                    DatePosted = c.DatePosted,
+                    DateUpdated = c.DateUpdated,
+
+                    ModelName = c.Model.Name,
+                    Manufacturer = c.Model.Manufacturer.Name,
+
+                    // CarSpecification details (accessing FirstOrDefault from ICollection)
+                    Color = c.Specifications.Any() ? c.Specifications.FirstOrDefault().ExteriorColor : null,
+                    InteriorColor = c.Specifications.Any() ? c.Specifications.FirstOrDefault().InteriorColor : null,
+                    Transmission = c.Specifications.Any() ? c.Specifications.FirstOrDefault().Transmission : null,
+                    Engine = c.Specifications.Any() ? c.Specifications.FirstOrDefault().Engine : null,
+                    FuelType = c.Specifications.Any() ? c.Specifications.FirstOrDefault().FuelType : null,
+                    CarType = c.Specifications.Any() ? c.Specifications.FirstOrDefault().CarType : null,
+                    SeatingCapacity = c.Specifications.Any() ? c.Specifications.FirstOrDefault().SeatingCapacity : 0,
+
+                    // CarPricingDetail details (accessing FirstOrDefault from ICollection)
+                    RegistrationFee = c.CarPricingDetails.Any() ? c.CarPricingDetails.FirstOrDefault().RegistrationFee : 0,
+                    TaxRate = c.CarPricingDetails.Any() ? c.CarPricingDetails.FirstOrDefault().TaxRate : 0,
+
+                    // Image and Video URLs
+
+                    // Image and Video URLs
+                    ImageUrl = c.CarImages.Select(ci => ci.Url).ToList(),
+                    VideoUrl = c.CarVideos.Select(cv => cv.Url).ToList(),
+
+                    // Features
+                    Features = c.CarListingFeatures.Select(clf => new CarFeatureDto
+                    {
+                        FeatureId = clf.Feature.FeatureId,
+                        Name = clf.Feature.Name
+                    }).ToList(),
+
+                    // Showrooms
+                    Showrooms = c.StoreListings.Select(sl => new CarInventoryDto
+                    {
+                        InventoryId = sl.StoreListingId,
+                        ListingId = sl.ListingId,
+                        ShowroomId = sl.StoreLocationId,
+                        ShowroomName = sl.StoreLocation.Name,
+                        Quantity = sl.CurrentQuantity
+                    }).ToList(),
+
+                    // Derived Status and Available Units
+                    Status = c.StoreListings.Any(sl => sl.CurrentQuantity > 0) ? "Available" : "Unavailable",
+                    AvailableUnits = c.StoreListings.Sum(sl => (int?)sl.CurrentQuantity) ?? 0
+                })
+                .FirstOrDefaultAsync();
 
             if (car == null)
                 return NotFound();
+
             return Ok(car);
         }
+
 
         [HttpPost("cars/add")]
         public async Task<IActionResult> AddNewCar([FromBody] AddCarDto dto)
         {
-            // 1. Tạo CarListing
-            var car = new CarListing
+            using var transaction = await _context.Database.BeginTransactionAsync();
+            try
             {
-                ModelId = dto.ModelId,
-                UserId = dto.UserId,
-                Year = dto.Year,
-                Mileage = dto.Mileage,
-                Price = dto.Price,
-                Condition = dto.Condition,
-                RentSell = dto.RentSell,
-                Description = dto.Description,
-                Certified = dto.Certified,
-                Vin = dto.Vin,
-                DatePosted = DateTime.Now,
-                DateUpdated = DateTime.Now,
-            };
-            _context.CarListings.Add(car);
-            await _context.SaveChangesAsync();
+                // 1. Create CarListing
+                var car = new CarListing
+                {
+                    ModelId = dto.ModelId,
+                    UserId = dto.UserId,
+                    Year = dto.Year,
+                    Mileage = dto.Mileage,
+                    Price = dto.Price,
+                    Condition = dto.Condition,
+                    RentSell = dto.RentSell,
+                    Description = dto.Description,
+                    Certified = dto.Certified,
+                    Vin = dto.Vin,
+                    DatePosted = DateTime.Now,
+                    DateUpdated = DateTime.Now
+                };
+                _context.CarListings.Add(car);
+                await _context.SaveChangesAsync();
 
-            // 2. CarSpecification
-            var spec = new CarSpecification
-            {
-                ListingId = car.ListingId,
-                ExteriorColor = dto.Color,
-                InteriorColor = dto.InteriorColor,
-                Transmission = dto.Transmission,
-                Engine = dto.Engine,
-                FuelType = dto.FuelType,
-                CarType = dto.CarType,
-                SeatingCapacity = dto.SeatingCapacity
-            };
-            _context.CarSpecifications.Add(spec);
-
-            // 3. CarPricingDetail
-            var pricing = new CarPricingDetail
-            {
-                ListingId = car.ListingId,
-                RegistrationFee = dto.RegistrationFee,
-                TaxRate = dto.TaxRate
-            };
-            _context.CarPricingDetails.Add(pricing);
-
-
-            // 5. CarImages
-            foreach (var url in dto.ImageUrls)
-            {
-                _context.CarImages.Add(new CarImage
+                // 2. Create CarSpecification
+                var spec = new CarSpecification
                 {
                     ListingId = car.ListingId,
-                    Url = url
-                });
-            }
+                    ExteriorColor = dto.ColorId.ToString(),
+                    InteriorColor = dto.InteriorColor,
+                    Transmission = dto.Transmission,
+                    Engine = dto.Engine,
+                    FuelType = dto.FuelType,
+                    CarType = dto.CarType,
+                    SeatingCapacity = dto.SeatingCapacity
+                };
+                _context.CarSpecifications.Add(spec);
 
-            // 6. CarListingFeature
-            foreach (var fid in dto.FeatureIds)
-            {
-                _context.CarListingFeatures.Add(new CarListingFeature
+                // 3. Create CarPricingDetail
+                var pricing = new CarPricingDetail
                 {
                     ListingId = car.ListingId,
-                    FeatureId = fid
+                    RegistrationFee = Math.Round(dto.RegistrationFee, 2),
+                    TaxRate = Math.Round(dto.TaxRate, 2)
+                };
+                _context.CarPricingDetails.Add(pricing);
+
+                // 4. Add Car Images
+                if (dto.ImageUrls != null)
+                {
+                    foreach (var url in dto.ImageUrls)
+                    {
+                        _context.CarImages.Add(new CarImage
+                        {
+                            ListingId = car.ListingId,
+                            Url = url
+                        });
+                    }
+                }
+
+                // 5. Add Features
+                if (dto.FeatureIds != null)
+                {
+                    foreach (var featureId in dto.FeatureIds)
+                    {
+                        _context.CarListingFeatures.Add(new CarListingFeature
+                        {
+                            ListingId = car.ListingId,
+                            FeatureId = featureId
+                        });
+                    }
+                }
+
+                if (dto.VideoUrls != null)
+                {
+                    foreach (var url in dto.VideoUrls)
+                    {
+                        _context.CarVideos.Add(new CarVideo
+                        {
+                            ListingId = car.ListingId,
+                            Url = url,
+                            CreatedAt = DateTime.Now
+                        });
+                    }
+                }
+
+                await _context.SaveChangesAsync();
+                await transaction.CommitAsync();
+
+                return Ok(new { success = true, message = "Car added successfully." });
+            }
+            catch (Exception ex)
+            {
+                await transaction.RollbackAsync();
+                return BadRequest(new
+                {
+                    success = false,
+                    message = "An error occurred while adding the car.",
+                    error = ex.Message,
+                    inner = ex.InnerException?.Message
                 });
             }
-
-            await _context.SaveChangesAsync();
-
-            return Ok(new { success = true, message = "Car added successfully" });
         }
+
 
         [HttpPut("cars/{id}")]
         public async Task<ActionResult> UpdateCar(int id, [FromBody] CarListing model)
@@ -662,7 +805,6 @@ namespace AutoSaleDN.Controllers
             public int Year { get; set; }
             public int Mileage { get; set; }
             public decimal Price { get; set; }
-            public string Location { get; set; }
             public string Condition { get; set; }
             public string RentSell { get; set; }
             public string Description { get; set; }
@@ -681,8 +823,9 @@ namespace AutoSaleDN.Controllers
             public int QuantityImported { get; set; }
             public DateTime ImportDate { get; set; }
             public decimal ImportPrice { get; set; }
-            public string Notes { get; set; }
             public List<string> ImageUrls { get; set; }
+
+            public List<string> VideoUrls { get; set; }
             public List<int> FeatureIds { get; set; }
         }
 

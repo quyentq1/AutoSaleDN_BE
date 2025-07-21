@@ -34,6 +34,8 @@ namespace AutoSaleDN.Models
         public DbSet<StoreLocation> StoreLocations { get; set; }
         public DbSet<DeliveryAddress> DeliveryAddresses { get; set; }
 
+        public DbSet<CarVideo> CarVideos { get; set; }
+
         public DbSet<StoreListing> StoreListings { get; set; }
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
@@ -54,17 +56,17 @@ namespace AutoSaleDN.Models
             modelBuilder.Entity<Review>().HasIndex(r => new { r.ListingId, r.UserId }).IsUnique();
 
             // Decimal precision
-            modelBuilder.Entity<CarListing>().Property(c => c.Price).HasColumnType("decimal(10,2)");
-            modelBuilder.Entity<CarPricingDetail>().Property(c => c.TaxRate).HasColumnType("decimal(5,4)");
-            modelBuilder.Entity<CarPricingDetail>().Property(c => c.RegistrationFee).HasColumnType("decimal(10,2)");
-            modelBuilder.Entity<Booking>().Property(b => b.TotalPrice).HasColumnType("decimal(10,2)");
-            modelBuilder.Entity<Booking>().Property(b => b.PaidPrice).HasColumnType("decimal(10,2)");
-            modelBuilder.Entity<Payment>().Property(p => p.Amount).HasColumnType("decimal(10,2)");
-            modelBuilder.Entity<CarSale>().Property(c => c.FinalPrice).HasColumnType("decimal(10,2)");
-            modelBuilder.Entity<Report>().Property(r => r.AverageListingPrice).HasColumnType("decimal(10,2)");
-            modelBuilder.Entity<Report>().Property(r => r.TotalListingValue).HasColumnType("decimal(10,2)");
-            modelBuilder.Entity<Report>().Property(r => r.TotalBookingValue).HasColumnType("decimal(10,2)");
-            modelBuilder.Entity<Report>().Property(r => r.TotalRevenue).HasColumnType("decimal(10,2)");
+            modelBuilder.Entity<CarListing>().Property(c => c.Price).HasColumnType("decimal(18,2)");
+            modelBuilder.Entity<CarPricingDetail>().Property(c => c.TaxRate).HasColumnType("decimal(18,2)");
+            modelBuilder.Entity<CarPricingDetail>().Property(c => c.RegistrationFee).HasColumnType("decimal(18,2)");
+            modelBuilder.Entity<Booking>().Property(b => b.TotalPrice).HasColumnType("decimal(18,2)");
+            modelBuilder.Entity<Booking>().Property(b => b.PaidPrice).HasColumnType("decimal(18,2)");
+            modelBuilder.Entity<Payment>().Property(p => p.Amount).HasColumnType("decimal(18,2)");
+            modelBuilder.Entity<CarSale>().Property(c => c.FinalPrice).HasColumnType("decimal(18,2)");
+            modelBuilder.Entity<Report>().Property(r => r.AverageListingPrice).HasColumnType("decimal(18,2)");
+            modelBuilder.Entity<Report>().Property(r => r.TotalListingValue).HasColumnType("decimal(18,2)");
+            modelBuilder.Entity<Report>().Property(r => r.TotalBookingValue).HasColumnType("decimal(18,2)");
+            modelBuilder.Entity<Report>().Property(r => r.TotalRevenue).HasColumnType("decimal(18,2)");
             modelBuilder.Entity<Report>().Property(r => r.AverageRating).HasColumnType("decimal(3,2)");
 
             modelBuilder.Entity<User>()
@@ -165,6 +167,24 @@ namespace AutoSaleDN.Models
 
             modelBuilder.Entity<CarInventory>()
             .HasIndex(ci => new { ci.StoreListingId, ci.TransactionDate });
+
+            modelBuilder.Entity<CarVideo>(entity =>
+            {
+                entity.HasKey(e => e.VideoId);
+                entity.Property(e => e.Url).IsRequired();
+                entity.HasOne(e => e.CarListing)
+                      .WithMany()
+                      .HasForeignKey(e => e.ListingId)
+                      .OnDelete(DeleteBehavior.Cascade);
+            });
+            modelBuilder.Entity<CarImage>()
+                .HasOne(ci => ci.CarListing)
+                .WithMany(cl => cl.CarImages)
+                .HasForeignKey(ci => ci.ListingId);
+            modelBuilder.Entity<CarVideo>()
+                .HasOne(cv => cv.CarListing)
+                .WithMany(cl => cl.CarVideos)
+                .HasForeignKey(cv => cv.ListingId);
         }
     }
 }
