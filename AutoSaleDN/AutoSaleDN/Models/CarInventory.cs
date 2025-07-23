@@ -4,21 +4,12 @@ using System.ComponentModel.DataAnnotations.Schema;
 
 namespace AutoSaleDN.Models
 {
-    public class CarColor
-    {
-        [Key]
-        public int ColorId { get; set; }
-        public string Name { get; set; }
-
-        public bool Status { get; set; } = true;
-    }
-
     public class CarInventory
     {
         [Key]
         public int InventoryId { get; set; }
         public int StoreListingId { get; set; }
-        public int TransactionType { get; set; } // 1: Nhập hàng, 2: Xuất hàng, 3: Điều chỉnh
+        public int TransactionType { get; set; }
         public int Quantity { get; set; }
         public decimal? UnitPrice { get; set; } 
         public string ReferenceId { get; set; }
