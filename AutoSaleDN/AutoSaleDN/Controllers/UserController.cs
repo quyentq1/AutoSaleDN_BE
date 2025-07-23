@@ -496,39 +496,6 @@ public class UserController : ControllerBase
         return Ok(similarCars);
     }
 
-    //[HttpPost("cars/{id}/test-drive")]
-    //public async Task<IActionResult> RequestTestDrive(int id, [FromBody] BookingDto request)
-    //{
-    //    var car = await _context.CarListings.FindAsync(id);
-    //    if (car == null)
-    //        return NotFound(new { message = "Car not found." });
-
-    //    var showroom = await _context.StoreLocations.FindAsync();
-    //    if (showroom == null)
-    //        return NotFound(new { message = "Showroom not found." });
-
-    //    // Save test drive request (example implementation)
-    //    var testDrive = new Booking
-    //    {
-    //        CarListingId = id,
-    //        ShowroomId = request.ShowroomId,
-    //        Name = request.Name,
-    //        Phone = request.Phone,
-    //        Email = request.Email,
-    //        PreferredDate = request.PreferredDate,
-    //        CreatedAt = DateTime.UtcNow
-    //    };
-    //    _context.Bookings.Add(testDrive);
-    //    await _context.SaveChangesAsync();
-
-    //    await SendEmailAsync(
-    //        request.Email,
-    //        "Test Drive Request Confirmation",
-    //        $"Your test drive request for {car.Model.Manufacturer.Name} {car.Model.Name} at {showroom.Name} has been received. We'll contact you soon to confirm your appointment."
-    //    );
-
-    //    return Ok(new { message = "Test drive request submitted successfully." });
-    //}
 
     private string GenerateJwtToken(User user)
     {
