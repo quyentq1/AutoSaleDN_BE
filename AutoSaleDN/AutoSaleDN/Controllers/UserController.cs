@@ -12,6 +12,7 @@ using MimeKit;
 using MailKit.Net.Smtp;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.AspNetCore.Authorization;
+using System.Globalization;
 
 [Route("api/[controller]")]
 [ApiController]
@@ -175,14 +176,17 @@ public class UserController : ControllerBase
         [FromQuery] int? mileageFrom = null,
         [FromQuery] int? mileageTo = null,
         [FromQuery] string? transmission = null,
-        [FromQuery] string? fuel = null,
+        [FromQuery] string? fuelType = null,
         [FromQuery] string? powerUnit = null,
         [FromQuery] double? powerFrom = null,
         [FromQuery] double? powerTo = null,
         [FromQuery] string? vehicleType = null,
         [FromQuery] bool? driveType4x4 = null,
         [FromQuery] string? color = null,
-        [FromQuery] List<string>? features = null
+        [FromQuery] List<string>? features = null,
+        [FromQuery] string? sortBy = null,
+        [FromQuery] int page = 1,
+        [FromQuery] int perPage = 5 
     )
     {
         var query = _context.CarListings
@@ -252,9 +256,9 @@ public class UserController : ControllerBase
         {
             query = query.Where(c => c.Specifications.Any(s => s.Transmission == transmission));
         }
-        if (!string.IsNullOrEmpty(fuel))
+        if (!string.IsNullOrEmpty(fuelType))
         {
-            query = query.Where(c => c.Specifications.Any(s => s.FuelType == fuel));
+            query = query.Where(c => c.Specifications.Any(s => s.FuelType == fuelType));
         }
         if (!string.IsNullOrEmpty(vehicleType))
         {
@@ -275,6 +279,14 @@ public class UserController : ControllerBase
                 query = query.Where(c => c.CarListingFeatures.Any(clf => clf.Feature.Name == featureName));
             }
         }
+        query = query.OrderByDescending(c => c.DatePosted);
+
+        var totalResults = await query.CountAsync();
+
+        // Apply Pagination
+        var carsToSkip = (page - 1) * perPage;
+        query = query.Skip(carsToSkip).Take(perPage);
+
 
         var cars = await query
             .Select(c => new
@@ -352,8 +364,15 @@ public class UserController : ControllerBase
                 }) : null
             })
             .ToListAsync();
+        var totalPages = (int)Math.Ceiling((double)totalResults / perPage);
+        if (totalPages == 0 && totalResults > 0) totalPages = 1; // Ensure at least 1 page if there are results
 
-        return Ok(cars);
+        return Ok(new
+        {
+            cars = cars,
+            totalResults = totalResults,
+            totalPages = totalPages
+        });
     }
 
     [HttpGet("cars/{id}")]
@@ -364,6 +383,7 @@ public class UserController : ControllerBase
                 .ThenInclude(m => m.Manufacturer)
             .Include(c => c.Specifications)
             .Include(c => c.CarImages)
+            .Include(c => c.CarVideos)
             .Include(c => c.CarListingFeatures)
                 .ThenInclude(clf => clf.Feature)
             .Include(c => c.CarServiceHistories)
@@ -414,6 +434,12 @@ public class UserController : ControllerBase
                 i.ImageId,
                 i.Url,
                 i.Filename
+            }) : null,
+            CarVideo = car.CarVideos != null ? car.CarVideos.Select(i => new
+            {
+                i.VideoId,
+                i.Url,
+                i.ListingId
             }) : null,
             Features = car.CarListingFeatures != null ? car.CarListingFeatures.Select(f => new
             {
@@ -536,6 +562,203 @@ public class UserController : ControllerBase
         await smtp.SendAsync(email);
         await smtp.DisconnectAsync(true);
     }
+    [HttpGet("cars/years")]
+    public async Task<IActionResult> GetDistinctRegistrationYears()
+    {
+        var years = await _context.CarListings
+            .Select(c => c.Year)
+            .Distinct()
+            .OrderByDescending(y => y)
+            .ToListAsync();
+        return Ok(years);
+    }
+    [HttpGet("cars/features")]
+    public async Task<IActionResult> GetDistinctFeatures()
+    {
+        var features = await _context.CarFeatures
+            .Select(f => f.Name)
+            .Distinct()
+            .OrderBy(name => name)
+            .ToListAsync();
+        return Ok(features);
+    }
+    [HttpGet("cars/vehicle-types")]
+    public async Task<IActionResult> GetDistinctVehicleTypes()
+    {
+        var vehicleTypes = await _context.CarListings
+            .Where(c => c.Specifications.Any())
+            .SelectMany(c => c.Specifications)
+            .Select(s => s.CarType)
+            .Where(type => type != null && type != "")
+            .Distinct()
+            .OrderBy(type => type)
+            .ToListAsync();
+        return Ok(vehicleTypes);
+    }
+    [HttpGet("cars/fuel-types")]
+    public async Task<IActionResult> GetDistinctFuelTypes()
+    {
+        var fuelTypes = await _context.CarListings
+            .Where(c => c.Specifications.Any())
+            .SelectMany(c => c.Specifications)
+            .Select(s => s.FuelType)
+            .Where(type => type != null && type != "")
+            .Distinct()
+            .OrderBy(type => type)
+            .ToListAsync();
+        return Ok(fuelTypes);
+    }
+
+    [HttpGet("cars/mileage-ranges")]
+    public async Task<IActionResult> GetMileageRanges()
+    {
+        var minMileage = await _context.CarListings
+            .MinAsync(c => (int?)c.Mileage);
+        var maxMileage = await _context.CarListings
+            .MaxAsync(c => (int?)c.Mileage);
+
+        if (!minMileage.HasValue || !maxMileage.HasValue)
+        {
+            return Ok(new List<object>()); 
+        }
+
+        var breakpoints = new List<int> { 10000, 50000, 100000, 150000 };
+        breakpoints.Sort();
+
+        var ranges = new List<object>();
+
+        int currentMin = 0;
+
+        if (minMileage.Value > 0)
+        {
+            ranges.Add(new { value = $"0-{minMileage.Value}", label = $"0 - {minMileage.Value:N0} km" });
+            currentMin = minMileage.Value;
+        }
+
+
+        foreach (var bp in breakpoints)
+        {
+            if (currentMin < bp)
+            {
+                int rangeTo = Math.Min(bp, maxMileage.Value);
+                if (currentMin < rangeTo)
+                {
+                    ranges.Add(new { value = $"{currentMin}-{rangeTo}", label = $"{currentMin:N0} - {rangeTo:N0} km" });
+                }
+            }
+            currentMin = bp + 1;
+        }
+
+        if (maxMileage.Value >= currentMin)
+        {
+            ranges.Add(new { value = $"{currentMin}-max", label = $"Trên {currentMin:N0} km" });
+        }
+
+        if (ranges.Count == 0 && minMileage.HasValue && maxMileage.HasValue)
+        {
+            ranges.Add(new { value = $"{minMileage.Value}-{maxMileage.Value}", label = $"{minMileage.Value:N0} - {maxMileage.Value:N0} km" });
+        }
+
+
+        return Ok(ranges);
+    }
+
+    [HttpGet("cars/price-ranges")]
+    public async Task<IActionResult> GetPriceRanges()
+    {
+        var minPrice = await _context.CarListings
+            .MinAsync(c => (decimal?)c.Price); 
+        var maxPrice = await _context.CarListings
+            .MaxAsync(c => (decimal?)c.Price); 
+
+        if (!minPrice.HasValue || !maxPrice.HasValue)
+        {
+            return Ok(new List<object>());
+        }
+
+        var ranges = new List<object>();
+        decimal currentMin = minPrice.Value;
+
+        decimal[] potentialBreakpoints = new decimal[]
+        {
+        0m,             
+        50_000_000m,    
+        100_000_000m,   
+        200_000_000m,   
+        300_000_000m,   
+        500_000_000m,   
+        700_000_000m,   
+        1_000_000_000m, 
+        1_500_000_000m, 
+        2_000_000_000m, 
+        3_000_000_000m, 
+        5_000_000_000m, 
+                        
+        };
+
+        var relevantBreakpoints = potentialBreakpoints
+            .Where(bp => bp >= 0m && bp >= currentMin && bp <= maxPrice.Value) 
+            .OrderBy(bp => bp)
+            .ToList();
+
+        if (currentMin > 0m && (relevantBreakpoints.Count == 0 || relevantBreakpoints[0] > currentMin))
+        {
+            decimal firstRangeTo = relevantBreakpoints.Any() ? Math.Min(relevantBreakpoints[0], maxPrice.Value) : maxPrice.Value;
+            if (0m < firstRangeTo)
+            {
+                ranges.Add(new { value = $"0-{firstRangeTo}", label = $"0 - {FormatCurrency(firstRangeTo)} VND" });
+                currentMin = firstRangeTo + 1m; 
+            }
+        }
+        else if (currentMin == 0m && relevantBreakpoints.Any())
+        {
+
+            currentMin = 0m;
+        }
+
+        foreach (var bp in relevantBreakpoints)
+        {
+            if (currentMin < bp) 
+            {
+                ranges.Add(new { value = $"{currentMin}-{bp}", label = $"{FormatCurrency(currentMin)} - {FormatCurrency(bp)} VND" });
+                currentMin = bp + 1m; 
+            }
+        }
+
+        if (maxPrice.Value >= currentMin)
+        {
+            ranges.Add(new { value = $"{currentMin}-max", label = $"Above {FormatCurrency(currentMin)} VND" });
+        }
+
+        if (ranges.Count == 0 && minPrice.HasValue && maxPrice.HasValue)
+        {
+            ranges.Add(new { value = $"{minPrice.Value}-{maxPrice.Value}", label = $"{FormatCurrency(minPrice.Value)} - {FormatCurrency(maxPrice.Value)} VND" });
+        }
+
+        return Ok(ranges);
+    }
+
+    private string FormatCurrency(decimal amount)
+    {
+        if (amount >= 1_000_000_000m)
+        {
+            decimal billion = amount / 1_000_000_000m;
+            return $"{billion:0.#} billion";
+        }
+        else if (amount >= 1_000_000m)
+        {
+            decimal million = amount / 1_000_000m;
+            return $"{million:0.#} million";
+        }
+        else if (amount >= 1_000m)
+        {
+            decimal thousand = amount / 1_000m;
+            return $"{thousand:0.#} thousand";
+        }
+     
+        return amount.ToString("N0", CultureInfo.InvariantCulture);
+    }
+
 }
 
 public class TestDriveRequestDto
