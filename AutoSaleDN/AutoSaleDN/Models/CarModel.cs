@@ -8,7 +8,7 @@ namespace AutoSaleDN.Models
         public int ModelId { get; set; }
         public int ManufacturerId { get; set; }
 
-        public CarManufacturer? Manufacturer { get; set; }
+        public CarManufacturer? CarManufacturer { get; set; }
 
         [Required(ErrorMessage = "Model name is required."), StringLength(255)]
         public string Name { get; set; } = string.Empty;

@@ -28,11 +28,12 @@ namespace AutoSaleDN.Models
         public StoreLocation? StoreLocation { get; set; }
 
         public ICollection<CarListing> CarListings { get; set; }
-        public ICollection<Booking> Bookings { get; set; }
         public ICollection<Payment> Payments { get; set; }
         public ICollection<Report> Reports { get; set; }
         public ICollection<Review> Reviews { get; set; }
         public ICollection<BlogPost> BlogPosts { get; set; }
         public ICollection<CarSale> CarSales { get; set; }
+
+        public ICollection<DeliveryAddress>? DeliveryAddresses { get; set; }
     }
 }

@@ -45,7 +45,8 @@ public class UserController : ControllerBase
             Password = BCrypt.Net.BCrypt.HashPassword(model.Password),
             CreatedAt = DateTime.UtcNow,
             UpdatedAt = DateTime.UtcNow,
-            Province = model.Province
+            Province = model.Province,
+            Status = true
         };
         _context.Users.Add(user);
         await _context.SaveChangesAsync();
@@ -191,7 +192,7 @@ public class UserController : ControllerBase
     {
         var query = _context.CarListings
             .Include(c => c.Model)
-                .ThenInclude(m => m.Manufacturer)
+                .ThenInclude(m => m.CarManufacturer)
             .Include(c => c.Specifications)
             .Include(c => c.CarImages)
             .Include(c => c.CarListingFeatures)
@@ -211,7 +212,7 @@ public class UserController : ControllerBase
         {
             query = query.Where(c =>
                 c.Model.Name.Contains(keyword) ||
-                c.Model.Manufacturer.Name.Contains(keyword) ||
+                c.Model.CarManufacturer.Name.Contains(keyword) ||
                 c.Description.Contains(keyword) ||
                 c.Year.ToString().Contains(keyword)
             );
@@ -306,8 +307,8 @@ public class UserController : ControllerBase
                     c.Model.Name,
                     Manufacturer = new
                     {
-                        c.Model.Manufacturer.ManufacturerId,
-                        c.Model.Manufacturer.Name
+                        c.Model.CarManufacturer.ManufacturerId,
+                        c.Model.CarManufacturer.Name
                     }
                 },
                 Specifications = c.Specifications != null ? c.Specifications.Select(s => new
@@ -380,7 +381,7 @@ public class UserController : ControllerBase
     {
         var car = await _context.CarListings
             .Include(c => c.Model)
-                .ThenInclude(m => m.Manufacturer)
+                .ThenInclude(m => m.CarManufacturer)
             .Include(c => c.Specifications)
             .Include(c => c.CarImages)
             .Include(c => c.CarVideos)
@@ -416,8 +417,8 @@ public class UserController : ControllerBase
                 car.Model.Name,
                 Manufacturer = new
                 {
-                    car.Model.Manufacturer.ManufacturerId,
-                    car.Model.Manufacturer.Name
+                    car.Model.CarManufacturer.ManufacturerId,
+                    car.Model.CarManufacturer.Name
                 }
             },
             Specification = car.Specifications != null ? car.Specifications.Select(s => new
@@ -488,7 +489,7 @@ public class UserController : ControllerBase
     {
         var car = await _context.CarListings
             .Include(c => c.Model)
-                .ThenInclude(m => m.Manufacturer)
+                .ThenInclude(m => m.CarManufacturer)
             .FirstOrDefaultAsync(c => c.ListingId == id);
 
         if (car == null)
@@ -496,7 +497,7 @@ public class UserController : ControllerBase
 
         var similarCars = await _context.CarListings
             .Include(c => c.Model)
-                .ThenInclude(m => m.Manufacturer)
+                .ThenInclude(m => m.CarManufacturer)
             .Include(c => c.Specifications)
             .Include(c => c.CarImages)
             .Include(c => c.CarListingFeatures)
@@ -506,7 +507,7 @@ public class UserController : ControllerBase
             .Select(c => new
             {
                 c.ListingId,
-                Name = $"{c.Model.Manufacturer.Name} {c.Model.Name}",
+                Name = $"{c.Model.CarManufacturer.Name} {c.Model.Name}",
                 Image = c.CarImages != null ? c.CarImages.Select(i => i.Url).FirstOrDefault() : null,
                 c.Price,
                 Details = c.Specifications != null ? c.Specifications.Select(s => new

@@ -19,17 +19,18 @@ namespace AutoSaleDN.Models
         public bool Certified { get; set; } = false;
         public string? Vin { get; set; }
         public string? Description { get; set; }
-        public string? RentSell { get; set; }
+        public string? Status { get; set; }
+
+
         public ICollection<CarSpecification>? Specifications { get; set; }
         public ICollection<CarListingFeature>? CarListingFeatures { get; set; }
         public ICollection<CarImage>? CarImages { get; set; }
         public ICollection<CarVideo>? CarVideos { get; set; }
-        public ICollection<Booking>? Bookings { get; set; }
         public ICollection<CarServiceHistory>? CarServiceHistories { get; set; }
         public ICollection<CarPricingDetail>? CarPricingDetails { get; set; }
         public ICollection<Review>? Reviews { get; set; }
         public ICollection<CarSale>? CarSales { get; set; }
-        public ICollection<Payment>? Payments { get; set; }
         public ICollection<StoreListing>? StoreListings { get; set; }
-        }
+        public ICollection<Payment>? Payments { get; set; }
     }
+}

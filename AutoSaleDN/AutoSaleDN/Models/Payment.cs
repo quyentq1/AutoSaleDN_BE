@@ -17,11 +17,13 @@ namespace AutoSaleDN.Models
         public DateTime DateOfPayment { get; set; } = DateTime.Now;
         public int ListingId { get; set; }
         public CarListing Listing { get; set; }
-        public int BookingId { get; set; }
-        public Booking Booking { get; set; }
         public string? AdditionalDetails { get; set; }
         public DateTime CreatedAt { get; set; } = DateTime.Now;
         public DateTime UpdatedAt { get; set; } = DateTime.Now;
+
+        public int? PaymentForSaleId { get; set; }           
+        public CarSale? PaymentForSale { get; set; }
+        public string? PaymentPurpose { get; set; }      
         public ICollection<PaymentTransaction>? PaymentTransactions { get; set; }
     }
 }

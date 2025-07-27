@@ -32,7 +32,7 @@ namespace AutoSaleDN.Controllers
                 return NotFound("No car models found.");
             }
             return await _context.CarModels
-                                 .Include(cm => cm.Manufacturer) // Eager load the Manufacturer data
+                                 .Include(cm => cm.CarManufacturer) // Eager load the Manufacturer data
                                  .ToListAsync();
         }
 
@@ -45,7 +45,7 @@ namespace AutoSaleDN.Controllers
                 return NotFound();
             }
             var carModel = await _context.CarModels
-                                         .Include(cm => cm.Manufacturer) // Eager load the Manufacturer data
+                                         .Include(cm => cm.CarManufacturer) // Eager load the Manufacturer data
                                          .FirstOrDefaultAsync(cm => cm.ModelId == id);
 
             if (carModel == null)
@@ -67,7 +67,7 @@ namespace AutoSaleDN.Controllers
 
             var models = await _context.CarModels
                                         .Where(cm => cm.ManufacturerId == manufacturerId)
-                                        .Include(cm => cm.Manufacturer)
+                                        .Include(cm => cm.CarManufacturer)
                                         .ToListAsync();
 
             if (!models.Any() && !await _context.CarManufacturers.AnyAsync(m => m.ManufacturerId == manufacturerId))
@@ -104,7 +104,7 @@ namespace AutoSaleDN.Controllers
             await _context.SaveChangesAsync();
 
             // Reload the model with Manufacturer data before returning
-            await _context.Entry(carModel).Reference(cm => cm.Manufacturer).LoadAsync();
+            await _context.Entry(carModel).Reference(cm => cm.CarManufacturer).LoadAsync();
 
             return CreatedAtAction("GetCarModel", new { id = carModel.ModelId }, carModel);
         }

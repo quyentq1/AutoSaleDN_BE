@@ -6,7 +6,7 @@ using Microsoft.EntityFrameworkCore.Migrations;
 namespace AutoSaleDN.Migrations
 {
     /// <inheritdoc />
-    public partial class InitialCreate : Migration
+    public partial class InitialDB : Migration
     {
         /// <inheritdoc />
         protected override void Up(MigrationBuilder migrationBuilder)
@@ -39,12 +39,27 @@ namespace AutoSaleDN.Migrations
                 });
 
             migrationBuilder.CreateTable(
+                name: "CarColors",
+                columns: table => new
+                {
+                    ColorId = table.Column<int>(type: "int", nullable: false)
+                        .Annotation("SqlServer:Identity", "1, 1"),
+                    Name = table.Column<string>(type: "nvarchar(max)", nullable: false),
+                    Status = table.Column<bool>(type: "bit", nullable: false)
+                },
+                constraints: table =>
+                {
+                    table.PrimaryKey("PK_CarColors", x => x.ColorId);
+                });
+
+            migrationBuilder.CreateTable(
                 name: "CarFeatures",
                 columns: table => new
                 {
                     FeatureId = table.Column<int>(type: "int", nullable: false)
                         .Annotation("SqlServer:Identity", "1, 1"),
-                    Name = table.Column<string>(type: "nvarchar(255)", maxLength: 255, nullable: false)
+                    Name = table.Column<string>(type: "nvarchar(255)", maxLength: 255, nullable: false),
+                    Status = table.Column<bool>(type: "bit", nullable: false)
                 },
                 constraints: table =>
                 {
@@ -65,6 +80,25 @@ namespace AutoSaleDN.Migrations
                 });
 
             migrationBuilder.CreateTable(
+                name: "Promotions",
+                columns: table => new
+                {
+                    PromotionId = table.Column<int>(type: "int", nullable: false)
+                        .Annotation("SqlServer:Identity", "1, 1"),
+                    Title = table.Column<string>(type: "nvarchar(max)", nullable: false),
+                    Description = table.Column<string>(type: "nvarchar(max)", nullable: false),
+                    DiscountAmount = table.Column<decimal>(type: "decimal(18,2)", nullable: false),
+                    StartDate = table.Column<DateTime>(type: "datetime2", nullable: false),
+                    EndDate = table.Column<DateTime>(type: "datetime2", nullable: false),
+                    CreatedAt = table.Column<DateTime>(type: "datetime2", nullable: false),
+                    UpdatedAt = table.Column<DateTime>(type: "datetime2", nullable: true)
+                },
+                constraints: table =>
+                {
+                    table.PrimaryKey("PK_Promotions", x => x.PromotionId);
+                });
+
+            migrationBuilder.CreateTable(
                 name: "SaleStatus",
                 columns: table => new
                 {
@@ -75,6 +109,43 @@ namespace AutoSaleDN.Migrations
                 constraints: table =>
                 {
                     table.PrimaryKey("PK_SaleStatus", x => x.SaleStatusId);
+                });
+
+            migrationBuilder.CreateTable(
+                name: "StoreLocations",
+                columns: table => new
+                {
+                    StoreLocationId = table.Column<int>(type: "int", nullable: false)
+                        .Annotation("SqlServer:Identity", "1, 1"),
+                    Name = table.Column<string>(type: "nvarchar(max)", nullable: false),
+                    Address = table.Column<string>(type: "nvarchar(max)", nullable: false),
+                    CreatedAt = table.Column<DateTime>(type: "datetime2", nullable: false),
+                    UpdatedAt = table.Column<DateTime>(type: "datetime2", nullable: true)
+                },
+                constraints: table =>
+                {
+                    table.PrimaryKey("PK_StoreLocations", x => x.StoreLocationId);
+                });
+
+            migrationBuilder.CreateTable(
+                name: "CarModels",
+                columns: table => new
+                {
+                    ModelId = table.Column<int>(type: "int", nullable: false)
+                        .Annotation("SqlServer:Identity", "1, 1"),
+                    ManufacturerId = table.Column<int>(type: "int", nullable: false),
+                    Name = table.Column<string>(type: "nvarchar(255)", maxLength: 255, nullable: false),
+                    Status = table.Column<string>(type: "nvarchar(max)", nullable: false)
+                },
+                constraints: table =>
+                {
+                    table.PrimaryKey("PK_CarModels", x => x.ModelId);
+                    table.ForeignKey(
+                        name: "FK_CarModels_CarManufacturers_ManufacturerId",
+                        column: x => x.ManufacturerId,
+                        principalTable: "CarManufacturers",
+                        principalColumn: "ManufacturerId",
+                        onDelete: ReferentialAction.Restrict);
                 });
 
             migrationBuilder.CreateTable(
@@ -89,32 +160,21 @@ namespace AutoSaleDN.Migrations
                     FullName = table.Column<string>(type: "nvarchar(100)", maxLength: 100, nullable: false),
                     Mobile = table.Column<string>(type: "nvarchar(15)", maxLength: 15, nullable: true),
                     Role = table.Column<string>(type: "nvarchar(20)", maxLength: 20, nullable: false),
+                    Province = table.Column<string>(type: "nvarchar(100)", maxLength: 100, nullable: false),
+                    Status = table.Column<bool>(type: "bit", nullable: false, defaultValue: false),
                     CreatedAt = table.Column<DateTime>(type: "datetime2", nullable: false),
-                    UpdatedAt = table.Column<DateTime>(type: "datetime2", nullable: false)
+                    UpdatedAt = table.Column<DateTime>(type: "datetime2", nullable: false),
+                    StoreLocationId = table.Column<int>(type: "int", nullable: true)
                 },
                 constraints: table =>
                 {
                     table.PrimaryKey("PK_Users", x => x.UserId);
-                });
-
-            migrationBuilder.CreateTable(
-                name: "CarModels",
-                columns: table => new
-                {
-                    ModelId = table.Column<int>(type: "int", nullable: false)
-                        .Annotation("SqlServer:Identity", "1, 1"),
-                    ManufacturerId = table.Column<int>(type: "int", nullable: false),
-                    Name = table.Column<string>(type: "nvarchar(255)", maxLength: 255, nullable: false)
-                },
-                constraints: table =>
-                {
-                    table.PrimaryKey("PK_CarModels", x => x.ModelId);
                     table.ForeignKey(
-                        name: "FK_CarModels_CarManufacturers_ManufacturerId",
-                        column: x => x.ManufacturerId,
-                        principalTable: "CarManufacturers",
-                        principalColumn: "ManufacturerId",
-                        onDelete: ReferentialAction.Cascade);
+                        name: "FK_Users_StoreLocations_StoreLocationId",
+                        column: x => x.StoreLocationId,
+                        principalTable: "StoreLocations",
+                        principalColumn: "StoreLocationId",
+                        onDelete: ReferentialAction.SetNull);
                 });
 
             migrationBuilder.CreateTable(
@@ -151,6 +211,69 @@ namespace AutoSaleDN.Migrations
                 });
 
             migrationBuilder.CreateTable(
+                name: "CarListings",
+                columns: table => new
+                {
+                    ListingId = table.Column<int>(type: "int", nullable: false)
+                        .Annotation("SqlServer:Identity", "1, 1"),
+                    ModelId = table.Column<int>(type: "int", nullable: false),
+                    UserId = table.Column<int>(type: "int", nullable: false),
+                    Year = table.Column<int>(type: "int", nullable: true),
+                    Mileage = table.Column<int>(type: "int", nullable: true),
+                    Price = table.Column<decimal>(type: "decimal(18,2)", nullable: true),
+                    Condition = table.Column<string>(type: "nvarchar(max)", nullable: true),
+                    DatePosted = table.Column<DateTime>(type: "datetime2", nullable: false),
+                    DateUpdated = table.Column<DateTime>(type: "datetime2", nullable: false),
+                    Certified = table.Column<bool>(type: "bit", nullable: false),
+                    Vin = table.Column<string>(type: "nvarchar(max)", nullable: true),
+                    Description = table.Column<string>(type: "nvarchar(max)", nullable: true),
+                    RentSell = table.Column<string>(type: "nvarchar(max)", nullable: true)
+                },
+                constraints: table =>
+                {
+                    table.PrimaryKey("PK_CarListings", x => x.ListingId);
+                    table.ForeignKey(
+                        name: "FK_CarListings_CarModels_ModelId",
+                        column: x => x.ModelId,
+                        principalTable: "CarModels",
+                        principalColumn: "ModelId",
+                        onDelete: ReferentialAction.Restrict);
+                    table.ForeignKey(
+                        name: "FK_CarListings_Users_UserId",
+                        column: x => x.UserId,
+                        principalTable: "Users",
+                        principalColumn: "UserId",
+                        onDelete: ReferentialAction.Cascade);
+                });
+
+            migrationBuilder.CreateTable(
+                name: "DeliveryAddresses",
+                columns: table => new
+                {
+                    AddressId = table.Column<int>(type: "int", nullable: false)
+                        .Annotation("SqlServer:Identity", "1, 1"),
+                    UserId = table.Column<int>(type: "int", nullable: false),
+                    Address = table.Column<string>(type: "nvarchar(max)", nullable: false),
+                    Note = table.Column<string>(type: "nvarchar(max)", nullable: true),
+                    CreatedAt = table.Column<DateTime>(type: "datetime2", nullable: false),
+                    UpdatedAt = table.Column<DateTime>(type: "datetime2", nullable: true),
+                    RecipientName = table.Column<string>(type: "nvarchar(max)", nullable: true),
+                    RecipientPhone = table.Column<string>(type: "nvarchar(max)", nullable: true),
+                    IsDefault = table.Column<bool>(type: "bit", nullable: false, defaultValue: false),
+                    AddressType = table.Column<string>(type: "nvarchar(max)", nullable: true)
+                },
+                constraints: table =>
+                {
+                    table.PrimaryKey("PK_DeliveryAddresses", x => x.AddressId);
+                    table.ForeignKey(
+                        name: "FK_DeliveryAddresses_Users_UserId",
+                        column: x => x.UserId,
+                        principalTable: "Users",
+                        principalColumn: "UserId",
+                        onDelete: ReferentialAction.Restrict);
+                });
+
+            migrationBuilder.CreateTable(
                 name: "Reports",
                 columns: table => new
                 {
@@ -164,20 +287,20 @@ namespace AutoSaleDN.Migrations
                     ActiveListings = table.Column<int>(type: "int", nullable: true),
                     SoldListings = table.Column<int>(type: "int", nullable: true),
                     RentedListings = table.Column<int>(type: "int", nullable: true),
-                    AverageListingPrice = table.Column<decimal>(type: "decimal(10,2)", nullable: true),
-                    TotalListingValue = table.Column<decimal>(type: "decimal(10,2)", nullable: true),
+                    AverageListingPrice = table.Column<decimal>(type: "decimal(18,2)", nullable: true),
+                    TotalListingValue = table.Column<decimal>(type: "decimal(18,2)", nullable: true),
                     TotalBookings = table.Column<int>(type: "int", nullable: true),
                     PendingBookings = table.Column<int>(type: "int", nullable: true),
                     ConfirmedBookings = table.Column<int>(type: "int", nullable: true),
                     CanceledBookings = table.Column<int>(type: "int", nullable: true),
                     CompletedBookings = table.Column<int>(type: "int", nullable: true),
-                    TotalBookingValue = table.Column<decimal>(type: "decimal(10,2)", nullable: true),
+                    TotalBookingValue = table.Column<decimal>(type: "decimal(18,2)", nullable: true),
                     TotalPayments = table.Column<int>(type: "int", nullable: true),
                     SuccessfulPayments = table.Column<int>(type: "int", nullable: true),
                     FailedPayments = table.Column<int>(type: "int", nullable: true),
                     PendingPayments = table.Column<int>(type: "int", nullable: true),
                     RefundedPayments = table.Column<int>(type: "int", nullable: true),
-                    TotalRevenue = table.Column<decimal>(type: "decimal(10,2)", nullable: true),
+                    TotalRevenue = table.Column<decimal>(type: "decimal(18,2)", nullable: true),
                     TotalReviews = table.Column<int>(type: "int", nullable: true),
                     AverageRating = table.Column<decimal>(type: "decimal(3,2)", nullable: true),
                     FiveStarReviews = table.Column<int>(type: "int", nullable: true),
@@ -194,44 +317,6 @@ namespace AutoSaleDN.Migrations
                     table.PrimaryKey("PK_Reports", x => x.ReportId);
                     table.ForeignKey(
                         name: "FK_Reports_Users_UserId",
-                        column: x => x.UserId,
-                        principalTable: "Users",
-                        principalColumn: "UserId",
-                        onDelete: ReferentialAction.Cascade);
-                });
-
-            migrationBuilder.CreateTable(
-                name: "CarListings",
-                columns: table => new
-                {
-                    ListingId = table.Column<int>(type: "int", nullable: false)
-                        .Annotation("SqlServer:Identity", "1, 1"),
-                    ModelId = table.Column<int>(type: "int", nullable: false),
-                    UserId = table.Column<int>(type: "int", nullable: false),
-                    Year = table.Column<int>(type: "int", nullable: true),
-                    Mileage = table.Column<int>(type: "int", nullable: true),
-                    Price = table.Column<decimal>(type: "decimal(10,2)", nullable: true),
-                    Location = table.Column<string>(type: "nvarchar(max)", nullable: true),
-                    Condition = table.Column<string>(type: "nvarchar(max)", nullable: true),
-                    ListingStatus = table.Column<string>(type: "nvarchar(max)", nullable: true),
-                    DatePosted = table.Column<DateTime>(type: "datetime2", nullable: false),
-                    DateUpdated = table.Column<DateTime>(type: "datetime2", nullable: false),
-                    Certified = table.Column<bool>(type: "bit", nullable: false),
-                    Vin = table.Column<string>(type: "nvarchar(max)", nullable: true),
-                    Description = table.Column<string>(type: "nvarchar(max)", nullable: true),
-                    RentSell = table.Column<string>(type: "nvarchar(max)", nullable: true)
-                },
-                constraints: table =>
-                {
-                    table.PrimaryKey("PK_CarListings", x => x.ListingId);
-                    table.ForeignKey(
-                        name: "FK_CarListings_CarModels_ModelId",
-                        column: x => x.ModelId,
-                        principalTable: "CarModels",
-                        principalColumn: "ModelId",
-                        onDelete: ReferentialAction.Cascade);
-                    table.ForeignKey(
-                        name: "FK_CarListings_Users_UserId",
                         column: x => x.UserId,
                         principalTable: "Users",
                         principalColumn: "UserId",
@@ -260,39 +345,6 @@ namespace AutoSaleDN.Migrations
                         principalTable: "BlogTags",
                         principalColumn: "TagId",
                         onDelete: ReferentialAction.Cascade);
-                });
-
-            migrationBuilder.CreateTable(
-                name: "Bookings",
-                columns: table => new
-                {
-                    BookingId = table.Column<int>(type: "int", nullable: false)
-                        .Annotation("SqlServer:Identity", "1, 1"),
-                    ListingId = table.Column<int>(type: "int", nullable: false),
-                    UserId = table.Column<int>(type: "int", nullable: false),
-                    BookingStartDate = table.Column<DateTime>(type: "datetime2", nullable: false),
-                    BookingEndDate = table.Column<DateTime>(type: "datetime2", nullable: false),
-                    TotalPrice = table.Column<decimal>(type: "decimal(10,2)", nullable: false),
-                    PaidPrice = table.Column<decimal>(type: "decimal(10,2)", nullable: false),
-                    BookingStatus = table.Column<string>(type: "nvarchar(max)", nullable: true),
-                    PaymentStatus = table.Column<string>(type: "nvarchar(max)", nullable: true),
-                    TransactionId = table.Column<string>(type: "nvarchar(max)", nullable: true)
-                },
-                constraints: table =>
-                {
-                    table.PrimaryKey("PK_Bookings", x => x.BookingId);
-                    table.ForeignKey(
-                        name: "FK_Bookings_CarListings_ListingId",
-                        column: x => x.ListingId,
-                        principalTable: "CarListings",
-                        principalColumn: "ListingId",
-                        onDelete: ReferentialAction.Restrict);
-                    table.ForeignKey(
-                        name: "FK_Bookings_Users_UserId",
-                        column: x => x.UserId,
-                        principalTable: "Users",
-                        principalColumn: "UserId",
-                        onDelete: ReferentialAction.Restrict);
                 });
 
             migrationBuilder.CreateTable(
@@ -347,8 +399,8 @@ namespace AutoSaleDN.Migrations
                     PricingDetailId = table.Column<int>(type: "int", nullable: false)
                         .Annotation("SqlServer:Identity", "1, 1"),
                     ListingId = table.Column<int>(type: "int", nullable: false),
-                    TaxRate = table.Column<decimal>(type: "decimal(5,4)", nullable: false),
-                    RegistrationFee = table.Column<decimal>(type: "decimal(10,2)", nullable: false)
+                    TaxRate = table.Column<decimal>(type: "decimal(18,2)", nullable: false),
+                    RegistrationFee = table.Column<decimal>(type: "decimal(18,2)", nullable: false)
                 },
                 constraints: table =>
                 {
@@ -410,6 +462,27 @@ namespace AutoSaleDN.Migrations
                 });
 
             migrationBuilder.CreateTable(
+                name: "CarVideos",
+                columns: table => new
+                {
+                    VideoId = table.Column<int>(type: "int", nullable: false)
+                        .Annotation("SqlServer:Identity", "1, 1"),
+                    ListingId = table.Column<int>(type: "int", nullable: false),
+                    Url = table.Column<string>(type: "nvarchar(max)", nullable: false),
+                    CreatedAt = table.Column<DateTime>(type: "datetime2", nullable: false)
+                },
+                constraints: table =>
+                {
+                    table.PrimaryKey("PK_CarVideos", x => x.VideoId);
+                    table.ForeignKey(
+                        name: "FK_CarVideos_CarListings_ListingId",
+                        column: x => x.ListingId,
+                        principalTable: "CarListings",
+                        principalColumn: "ListingId",
+                        onDelete: ReferentialAction.Cascade);
+                });
+
+            migrationBuilder.CreateTable(
                 name: "Reviews",
                 columns: table => new
                 {
@@ -418,10 +491,10 @@ namespace AutoSaleDN.Migrations
                     ListingId = table.Column<int>(type: "int", nullable: false),
                     UserId = table.Column<int>(type: "int", nullable: false),
                     Rating = table.Column<int>(type: "int", nullable: false),
-                    Feedback = table.Column<string>(type: "nvarchar(max)", nullable: true),
-                    ImageUrl = table.Column<string>(type: "nvarchar(512)", maxLength: 512, nullable: true),
-                    VideoUrl = table.Column<string>(type: "nvarchar(512)", maxLength: 512, nullable: true),
-                    CreatedAt = table.Column<DateTime>(type: "datetime2", nullable: false)
+                    Content = table.Column<string>(type: "nvarchar(max)", nullable: false),
+                    CreatedAt = table.Column<DateTime>(type: "datetime2", nullable: false),
+                    Reply = table.Column<string>(type: "nvarchar(max)", nullable: true),
+                    UpdatedAt = table.Column<DateTime>(type: "datetime2", nullable: true)
                 },
                 constraints: table =>
                 {
@@ -441,39 +514,133 @@ namespace AutoSaleDN.Migrations
                 });
 
             migrationBuilder.CreateTable(
+                name: "StoreListings",
+                columns: table => new
+                {
+                    StoreListingId = table.Column<int>(type: "int", nullable: false)
+                        .Annotation("SqlServer:Identity", "1, 1"),
+                    StoreLocationId = table.Column<int>(type: "int", nullable: false),
+                    ListingId = table.Column<int>(type: "int", nullable: false),
+                    InitialQuantity = table.Column<int>(type: "int", nullable: false),
+                    CurrentQuantity = table.Column<int>(type: "int", nullable: false),
+                    AvailableQuantity = table.Column<int>(type: "int", nullable: false),
+                    Status = table.Column<string>(type: "nvarchar(max)", nullable: false),
+                    AddedDate = table.Column<DateTime>(type: "datetime2", nullable: false),
+                    LastSoldDate = table.Column<DateTime>(type: "datetime2", nullable: true),
+                    RemovedDate = table.Column<DateTime>(type: "datetime2", nullable: true),
+                    ReasonForRemoval = table.Column<string>(type: "nvarchar(max)", nullable: true),
+                    LastStatusChangeDate = table.Column<DateTime>(type: "datetime2", nullable: true),
+                    LastPurchasePrice = table.Column<decimal>(type: "decimal(18,2)", nullable: true),
+                    AverageCost = table.Column<decimal>(type: "decimal(18,2)", nullable: true)
+                },
+                constraints: table =>
+                {
+                    table.PrimaryKey("PK_StoreListings", x => x.StoreListingId);
+                    table.ForeignKey(
+                        name: "FK_StoreListings_CarListings_ListingId",
+                        column: x => x.ListingId,
+                        principalTable: "CarListings",
+                        principalColumn: "ListingId",
+                        onDelete: ReferentialAction.Cascade);
+                    table.ForeignKey(
+                        name: "FK_StoreListings_StoreLocations_StoreLocationId",
+                        column: x => x.StoreLocationId,
+                        principalTable: "StoreLocations",
+                        principalColumn: "StoreLocationId",
+                        onDelete: ReferentialAction.Cascade);
+                });
+
+            migrationBuilder.CreateTable(
+                name: "CarInventories",
+                columns: table => new
+                {
+                    InventoryId = table.Column<int>(type: "int", nullable: false)
+                        .Annotation("SqlServer:Identity", "1, 1"),
+                    StoreListingId = table.Column<int>(type: "int", nullable: false),
+                    TransactionType = table.Column<int>(type: "int", nullable: false),
+                    Quantity = table.Column<int>(type: "int", nullable: false),
+                    UnitPrice = table.Column<decimal>(type: "decimal(18,2)", nullable: true),
+                    ReferenceId = table.Column<string>(type: "nvarchar(max)", nullable: false),
+                    Notes = table.Column<string>(type: "nvarchar(max)", nullable: false),
+                    CreatedBy = table.Column<string>(type: "nvarchar(max)", nullable: false),
+                    TransactionDate = table.Column<DateTime>(type: "datetime2", nullable: false),
+                    CreatedAt = table.Column<DateTime>(type: "datetime2", nullable: false)
+                },
+                constraints: table =>
+                {
+                    table.PrimaryKey("PK_CarInventories", x => x.InventoryId);
+                    table.ForeignKey(
+                        name: "FK_CarInventories_StoreListings_StoreListingId",
+                        column: x => x.StoreListingId,
+                        principalTable: "StoreListings",
+                        principalColumn: "StoreListingId",
+                        onDelete: ReferentialAction.Restrict);
+                });
+
+            migrationBuilder.CreateTable(
                 name: "CarSales",
                 columns: table => new
                 {
                     SaleId = table.Column<int>(type: "int", nullable: false)
                         .Annotation("SqlServer:Identity", "1, 1"),
-                    ListingId = table.Column<int>(type: "int", nullable: false),
-                    BookingId = table.Column<int>(type: "int", nullable: true),
+                    StoreListingId = table.Column<int>(type: "int", nullable: false),
+                    CustomerId = table.Column<int>(type: "int", nullable: false),
                     SaleStatusId = table.Column<int>(type: "int", nullable: false),
+                    FinalPrice = table.Column<decimal>(type: "decimal(18,2)", nullable: false),
                     SaleDate = table.Column<DateTime>(type: "datetime2", nullable: true),
-                    FinalPrice = table.Column<decimal>(type: "decimal(10,2)", nullable: true),
                     CreatedAt = table.Column<DateTime>(type: "datetime2", nullable: false),
-                    UpdatedAt = table.Column<DateTime>(type: "datetime2", nullable: false)
+                    UpdatedAt = table.Column<DateTime>(type: "datetime2", nullable: true),
+                    OrderNumber = table.Column<string>(type: "nvarchar(450)", nullable: true),
+                    DepositAmount = table.Column<decimal>(type: "decimal(18,2)", nullable: true),
+                    RemainingBalance = table.Column<decimal>(type: "decimal(18,2)", nullable: true),
+                    DeliveryOption = table.Column<string>(type: "nvarchar(max)", nullable: true),
+                    ShippingAddressId = table.Column<int>(type: "int", nullable: true),
+                    PickupStoreLocationId = table.Column<int>(type: "int", nullable: true),
+                    ExpectedDeliveryDate = table.Column<DateTime>(type: "datetime2", nullable: true),
+                    ActualDeliveryDate = table.Column<DateTime>(type: "datetime2", nullable: true),
+                    DepositPaymentId = table.Column<int>(type: "int", nullable: true),
+                    FullPaymentId = table.Column<int>(type: "int", nullable: true),
+                    OrderType = table.Column<string>(type: "nvarchar(max)", nullable: true),
+                    Notes = table.Column<string>(type: "nvarchar(max)", nullable: true),
+                    CarListingListingId = table.Column<int>(type: "int", nullable: true)
                 },
                 constraints: table =>
                 {
                     table.PrimaryKey("PK_CarSales", x => x.SaleId);
                     table.ForeignKey(
-                        name: "FK_CarSales_Bookings_BookingId",
-                        column: x => x.BookingId,
-                        principalTable: "Bookings",
-                        principalColumn: "BookingId",
-                        onDelete: ReferentialAction.Restrict);
-                    table.ForeignKey(
-                        name: "FK_CarSales_CarListings_ListingId",
-                        column: x => x.ListingId,
+                        name: "FK_CarSales_CarListings_CarListingListingId",
+                        column: x => x.CarListingListingId,
                         principalTable: "CarListings",
-                        principalColumn: "ListingId",
+                        principalColumn: "ListingId");
+                    table.ForeignKey(
+                        name: "FK_CarSales_DeliveryAddresses_ShippingAddressId",
+                        column: x => x.ShippingAddressId,
+                        principalTable: "DeliveryAddresses",
+                        principalColumn: "AddressId",
                         onDelete: ReferentialAction.Restrict);
                     table.ForeignKey(
                         name: "FK_CarSales_SaleStatus_SaleStatusId",
                         column: x => x.SaleStatusId,
                         principalTable: "SaleStatus",
                         principalColumn: "SaleStatusId",
+                        onDelete: ReferentialAction.Restrict);
+                    table.ForeignKey(
+                        name: "FK_CarSales_StoreListings_StoreListingId",
+                        column: x => x.StoreListingId,
+                        principalTable: "StoreListings",
+                        principalColumn: "StoreListingId",
+                        onDelete: ReferentialAction.Restrict);
+                    table.ForeignKey(
+                        name: "FK_CarSales_StoreLocations_PickupStoreLocationId",
+                        column: x => x.PickupStoreLocationId,
+                        principalTable: "StoreLocations",
+                        principalColumn: "StoreLocationId",
+                        onDelete: ReferentialAction.Restrict);
+                    table.ForeignKey(
+                        name: "FK_CarSales_Users_CustomerId",
+                        column: x => x.CustomerId,
+                        principalTable: "Users",
+                        principalColumn: "UserId",
                         onDelete: ReferentialAction.Restrict);
                 });
 
@@ -485,30 +652,31 @@ namespace AutoSaleDN.Migrations
                         .Annotation("SqlServer:Identity", "1, 1"),
                     UserId = table.Column<int>(type: "int", nullable: false),
                     TransactionId = table.Column<string>(type: "nvarchar(max)", nullable: false),
-                    Amount = table.Column<decimal>(type: "decimal(10,2)", nullable: false),
+                    Amount = table.Column<decimal>(type: "decimal(18,2)", nullable: false),
                     PaymentMethod = table.Column<string>(type: "nvarchar(max)", nullable: true),
                     PaymentStatus = table.Column<string>(type: "nvarchar(max)", nullable: true),
                     DateOfPayment = table.Column<DateTime>(type: "datetime2", nullable: false),
                     ListingId = table.Column<int>(type: "int", nullable: false),
-                    BookingId = table.Column<int>(type: "int", nullable: false),
                     AdditionalDetails = table.Column<string>(type: "nvarchar(max)", nullable: true),
                     CreatedAt = table.Column<DateTime>(type: "datetime2", nullable: false),
-                    UpdatedAt = table.Column<DateTime>(type: "datetime2", nullable: false)
+                    UpdatedAt = table.Column<DateTime>(type: "datetime2", nullable: false),
+                    PaymentForSaleId = table.Column<int>(type: "int", nullable: true),
+                    PaymentPurpose = table.Column<string>(type: "nvarchar(max)", nullable: true)
                 },
                 constraints: table =>
                 {
                     table.PrimaryKey("PK_Payments", x => x.PaymentId);
                     table.ForeignKey(
-                        name: "FK_Payments_Bookings_BookingId",
-                        column: x => x.BookingId,
-                        principalTable: "Bookings",
-                        principalColumn: "BookingId",
-                        onDelete: ReferentialAction.Restrict);
-                    table.ForeignKey(
                         name: "FK_Payments_CarListings_ListingId",
                         column: x => x.ListingId,
                         principalTable: "CarListings",
                         principalColumn: "ListingId",
+                        onDelete: ReferentialAction.Restrict);
+                    table.ForeignKey(
+                        name: "FK_Payments_CarSales_PaymentForSaleId",
+                        column: x => x.PaymentForSaleId,
+                        principalTable: "CarSales",
+                        principalColumn: "SaleId",
                         onDelete: ReferentialAction.Restrict);
                     table.ForeignKey(
                         name: "FK_Payments_Users_UserId",
@@ -576,16 +744,6 @@ namespace AutoSaleDN.Migrations
                 unique: true);
 
             migrationBuilder.CreateIndex(
-                name: "IX_Bookings_ListingId",
-                table: "Bookings",
-                column: "ListingId");
-
-            migrationBuilder.CreateIndex(
-                name: "IX_Bookings_UserId",
-                table: "Bookings",
-                column: "UserId");
-
-            migrationBuilder.CreateIndex(
                 name: "IX_CarFeatures_Name",
                 table: "CarFeatures",
                 column: "Name",
@@ -595,6 +753,11 @@ namespace AutoSaleDN.Migrations
                 name: "IX_CarImages_ListingId",
                 table: "CarImages",
                 column: "ListingId");
+
+            migrationBuilder.CreateIndex(
+                name: "IX_CarInventories_StoreListingId_TransactionDate",
+                table: "CarInventories",
+                columns: new[] { "StoreListingId", "TransactionDate" });
 
             migrationBuilder.CreateIndex(
                 name: "IX_CarListingFeatures_FeatureId",
@@ -628,19 +791,51 @@ namespace AutoSaleDN.Migrations
                 column: "ListingId");
 
             migrationBuilder.CreateIndex(
-                name: "IX_CarSales_BookingId",
+                name: "IX_CarSales_CarListingListingId",
                 table: "CarSales",
-                column: "BookingId");
+                column: "CarListingListingId");
 
             migrationBuilder.CreateIndex(
-                name: "IX_CarSales_ListingId",
+                name: "IX_CarSales_CustomerId",
                 table: "CarSales",
-                column: "ListingId");
+                column: "CustomerId");
+
+            migrationBuilder.CreateIndex(
+                name: "IX_CarSales_DepositPaymentId",
+                table: "CarSales",
+                column: "DepositPaymentId");
+
+            migrationBuilder.CreateIndex(
+                name: "IX_CarSales_FullPaymentId",
+                table: "CarSales",
+                column: "FullPaymentId");
+
+            migrationBuilder.CreateIndex(
+                name: "IX_CarSales_OrderNumber",
+                table: "CarSales",
+                column: "OrderNumber",
+                unique: true,
+                filter: "[OrderNumber] IS NOT NULL");
+
+            migrationBuilder.CreateIndex(
+                name: "IX_CarSales_PickupStoreLocationId",
+                table: "CarSales",
+                column: "PickupStoreLocationId");
 
             migrationBuilder.CreateIndex(
                 name: "IX_CarSales_SaleStatusId",
                 table: "CarSales",
                 column: "SaleStatusId");
+
+            migrationBuilder.CreateIndex(
+                name: "IX_CarSales_ShippingAddressId",
+                table: "CarSales",
+                column: "ShippingAddressId");
+
+            migrationBuilder.CreateIndex(
+                name: "IX_CarSales_StoreListingId",
+                table: "CarSales",
+                column: "StoreListingId");
 
             migrationBuilder.CreateIndex(
                 name: "IX_CarServiceHistories_ListingId",
@@ -653,14 +848,24 @@ namespace AutoSaleDN.Migrations
                 column: "ListingId");
 
             migrationBuilder.CreateIndex(
-                name: "IX_Payments_BookingId",
-                table: "Payments",
-                column: "BookingId");
+                name: "IX_CarVideos_ListingId",
+                table: "CarVideos",
+                column: "ListingId");
+
+            migrationBuilder.CreateIndex(
+                name: "IX_DeliveryAddresses_UserId",
+                table: "DeliveryAddresses",
+                column: "UserId");
 
             migrationBuilder.CreateIndex(
                 name: "IX_Payments_ListingId",
                 table: "Payments",
                 column: "ListingId");
+
+            migrationBuilder.CreateIndex(
+                name: "IX_Payments_PaymentForSaleId",
+                table: "Payments",
+                column: "PaymentForSaleId");
 
             migrationBuilder.CreateIndex(
                 name: "IX_Payments_UserId",
@@ -695,6 +900,16 @@ namespace AutoSaleDN.Migrations
                 unique: true);
 
             migrationBuilder.CreateIndex(
+                name: "IX_StoreListings_ListingId",
+                table: "StoreListings",
+                column: "ListingId");
+
+            migrationBuilder.CreateIndex(
+                name: "IX_StoreListings_StoreLocationId",
+                table: "StoreListings",
+                column: "StoreLocationId");
+
+            migrationBuilder.CreateIndex(
                 name: "IX_Users_Email",
                 table: "Users",
                 column: "Email",
@@ -705,16 +920,87 @@ namespace AutoSaleDN.Migrations
                 table: "Users",
                 column: "Name",
                 unique: true);
+
+            migrationBuilder.CreateIndex(
+                name: "IX_Users_StoreLocationId",
+                table: "Users",
+                column: "StoreLocationId");
+
+            migrationBuilder.AddForeignKey(
+                name: "FK_CarSales_Payments_DepositPaymentId",
+                table: "CarSales",
+                column: "DepositPaymentId",
+                principalTable: "Payments",
+                principalColumn: "PaymentId",
+                onDelete: ReferentialAction.Restrict);
+
+            migrationBuilder.AddForeignKey(
+                name: "FK_CarSales_Payments_FullPaymentId",
+                table: "CarSales",
+                column: "FullPaymentId",
+                principalTable: "Payments",
+                principalColumn: "PaymentId",
+                onDelete: ReferentialAction.Restrict);
         }
 
         /// <inheritdoc />
         protected override void Down(MigrationBuilder migrationBuilder)
         {
+            migrationBuilder.DropForeignKey(
+                name: "FK_CarListings_Users_UserId",
+                table: "CarListings");
+
+            migrationBuilder.DropForeignKey(
+                name: "FK_CarSales_Users_CustomerId",
+                table: "CarSales");
+
+            migrationBuilder.DropForeignKey(
+                name: "FK_DeliveryAddresses_Users_UserId",
+                table: "DeliveryAddresses");
+
+            migrationBuilder.DropForeignKey(
+                name: "FK_Payments_Users_UserId",
+                table: "Payments");
+
+            migrationBuilder.DropForeignKey(
+                name: "FK_CarSales_CarListings_CarListingListingId",
+                table: "CarSales");
+
+            migrationBuilder.DropForeignKey(
+                name: "FK_Payments_CarListings_ListingId",
+                table: "Payments");
+
+            migrationBuilder.DropForeignKey(
+                name: "FK_StoreListings_CarListings_ListingId",
+                table: "StoreListings");
+
+            migrationBuilder.DropForeignKey(
+                name: "FK_CarSales_StoreListings_StoreListingId",
+                table: "CarSales");
+
+            migrationBuilder.DropForeignKey(
+                name: "FK_CarSales_DeliveryAddresses_ShippingAddressId",
+                table: "CarSales");
+
+            migrationBuilder.DropForeignKey(
+                name: "FK_CarSales_Payments_DepositPaymentId",
+                table: "CarSales");
+
+            migrationBuilder.DropForeignKey(
+                name: "FK_CarSales_Payments_FullPaymentId",
+                table: "CarSales");
+
             migrationBuilder.DropTable(
                 name: "BlogPostTags");
 
             migrationBuilder.DropTable(
+                name: "CarColors");
+
+            migrationBuilder.DropTable(
                 name: "CarImages");
+
+            migrationBuilder.DropTable(
+                name: "CarInventories");
 
             migrationBuilder.DropTable(
                 name: "CarListingFeatures");
@@ -723,16 +1009,19 @@ namespace AutoSaleDN.Migrations
                 name: "CarPricingDetails");
 
             migrationBuilder.DropTable(
-                name: "CarSales");
-
-            migrationBuilder.DropTable(
                 name: "CarServiceHistories");
 
             migrationBuilder.DropTable(
                 name: "CarSpecifications");
 
             migrationBuilder.DropTable(
+                name: "CarVideos");
+
+            migrationBuilder.DropTable(
                 name: "PaymentTransactions");
+
+            migrationBuilder.DropTable(
+                name: "Promotions");
 
             migrationBuilder.DropTable(
                 name: "Reports");
@@ -750,16 +1039,10 @@ namespace AutoSaleDN.Migrations
                 name: "CarFeatures");
 
             migrationBuilder.DropTable(
-                name: "SaleStatus");
-
-            migrationBuilder.DropTable(
-                name: "Payments");
-
-            migrationBuilder.DropTable(
                 name: "BlogCategories");
 
             migrationBuilder.DropTable(
-                name: "Bookings");
+                name: "Users");
 
             migrationBuilder.DropTable(
                 name: "CarListings");
@@ -768,10 +1051,25 @@ namespace AutoSaleDN.Migrations
                 name: "CarModels");
 
             migrationBuilder.DropTable(
-                name: "Users");
+                name: "CarManufacturers");
 
             migrationBuilder.DropTable(
-                name: "CarManufacturers");
+                name: "StoreListings");
+
+            migrationBuilder.DropTable(
+                name: "DeliveryAddresses");
+
+            migrationBuilder.DropTable(
+                name: "Payments");
+
+            migrationBuilder.DropTable(
+                name: "CarSales");
+
+            migrationBuilder.DropTable(
+                name: "SaleStatus");
+
+            migrationBuilder.DropTable(
+                name: "StoreLocations");
         }
     }
 }

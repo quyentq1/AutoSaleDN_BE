@@ -83,7 +83,7 @@ namespace AutoSaleDN.Controllers
             car.Mileage = model.Mileage;
             car.Price = model.Price;
             car.Condition = model.Condition;
-            car.RentSell = model.RentSell;
+            car.Status = model.Status;
             car.Description = model.Description;
             car.DateUpdated = DateTime.UtcNow;
             await _context.SaveChangesAsync();
