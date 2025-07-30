@@ -5,6 +5,7 @@ using Microsoft.AspNetCore.Authorization;
 using System.ComponentModel.DataAnnotations;
 using AutoSaleDN.Services;
 using System.Security.Claims;
+using Microsoft.IdentityModel.Tokens;
 
 namespace AutoSaleDN.Controllers
 {
@@ -371,6 +372,7 @@ namespace AutoSaleDN.Controllers
                 await _context.SaveChangesAsync(); // Save CarSale to get SaleId
 
                 // Create Payment record for deposit
+                // Set PaymentStatus to "pending" if using external gateway like Momo/VNPay
                 var depositPayment = new Payment
                 {
                     UserId = userId,
@@ -379,7 +381,7 @@ namespace AutoSaleDN.Controllers
                     TransactionId = $"DEP-{Guid.NewGuid().ToString().Substring(0, 8).ToUpper()}",
                     Amount = dto.DepositAmount,
                     PaymentMethod = dto.DepositPaymentMethod,
-                    PaymentStatus = "completed", // Assuming payment gateway confirms status immediately for simplicity
+                    PaymentStatus = (dto.DepositPaymentMethod == "e_wallet_momo_test" || dto.DepositPaymentMethod == "e_wallet_vnpay_test") ? "pending" : "completed", // Set to pending if external gateway
                     PaymentPurpose = "deposit",
                     DateOfPayment = DateTime.UtcNow,
                     CreatedAt = DateTime.UtcNow,
@@ -388,138 +390,124 @@ namespace AutoSaleDN.Controllers
                 _context.Payments.Add(depositPayment);
                 await _context.SaveChangesAsync(); // Save Payment to get PaymentId
 
-                // Update CarSale with DepositPaymentId and new status
+                // Update CarSale with DepositPaymentId
                 carSale.DepositPaymentId = depositPayment.PaymentId;
-
-                // Get SaleStatus for "Deposit Paid"
-                var depositPaidStatus = await _context.SaleStatus.FirstOrDefaultAsync(s => s.StatusName == "Deposit Paid");
-                if (depositPaidStatus == null)
-                {
-                    return StatusCode(500, new { message = "Sale status 'Deposit Paid' not found in database. Please ensure it is seeded." });
-                }
-                carSale.SaleStatusId = depositPaidStatus.SaleStatusId; // Update status to Deposit Paid
                 carSale.UpdatedAt = DateTime.UtcNow; // Update timestamp
-
                 await _context.SaveChangesAsync(); // Save updated CarSale
 
-                // --- START: NEW LOGIC FOR EMAIL AND SMS NOTIFICATIONS ---
-
-                // Fetch necessary details for email/SMS after saving carSale and depositPayment
-                // Ensure CarSale includes Customer (User) and StoreListing.CarListing.CarModel.CarManufacturer
-                var fullCarSale = await _context.CarSales
-                    .Include(cs => cs.Customer) // Include User for email/phone
-                    .Include(cs => cs.StoreListing)
-                        .ThenInclude(sl => sl.CarListing)
-                            .ThenInclude(cl => cl.Model)
-                                .ThenInclude(cm => cm.CarManufacturer)
-                    .Include(cs => cs.DepositPayment) // Ensure deposit payment details are available
-                    .FirstOrDefaultAsync(cs => cs.SaleId == carSale.SaleId);
-
-                if (fullCarSale == null)
+                // --- NO EMAIL/SMS HERE FOR MOMO/VNPAY. IT WILL BE SENT FROM MOMO/VNPAY CALLBACK ---
+                // For other payment methods (e.g., bank transfer, installment plan), send email/SMS directly
+                if (dto.DepositPaymentMethod != "e_wallet_momo_test" && dto.DepositPaymentMethod != "e_wallet_vnpay_test")
                 {
-                    // This should ideally not happen if carSale was just saved, but good for robustness
-                    return StatusCode(500, new { message = "Failed to retrieve full order details for notification." });
-                }
+                    // Update CarSale status to "Deposit Paid" for non-gateway payments
+                    var depositPaidStatus = await _context.SaleStatus.FirstOrDefaultAsync(s => s.StatusName == "Deposit Paid");
+                    if (depositPaidStatus == null)
+                    {
+                        return StatusCode(500, new { message = "Sale status 'Deposit Paid' not found in database. Please ensure it is seeded." });
+                    }
+                    carSale.SaleStatusId = depositPaidStatus.SaleStatusId;
+                    carSale.UpdatedAt = DateTime.UtcNow;
+                    await _context.SaveChangesAsync(); // Save updated CarSale with new status
 
-                // Prepare email content
-                var customerEmail = fullCarSale.Customer?.Email;
-                var customerFullName = fullCarSale.Customer?.FullName;
-                var customerMobile = fullCarSale.Customer?.Mobile;
-                var carName = $"{fullCarSale.StoreListing.CarListing.Model.CarManufacturer.Name} {fullCarSale.StoreListing.CarListing.Model.Name}";
-                var depositAmountFormatted = fullCarSale.DepositAmount + " VND"; // Format currency
+                    // Fetch necessary details for email/SMS after saving carSale and depositPayment
+                    var fullCarSale = await _context.CarSales
+                        .Include(cs => cs.Customer)
+                        .Include(cs => cs.StoreListing).ThenInclude(sl => sl.CarListing).ThenInclude(cl => cl.Model).ThenInclude(cm => cm.CarManufacturer)
+                        .Include(cs => cs.DepositPayment)
+                        .FirstOrDefaultAsync(cs => cs.SaleId == carSale.SaleId);
 
-                // Calculate payment due date (e.g., 10 days before expected delivery) for email
-                DateTime? paymentDueDateForEmail = fullCarSale.ExpectedDeliveryDate?.AddDays(-10);
+                    if (fullCarSale == null)
+                    {
+                        return StatusCode(500, new { message = "Failed to retrieve full order details for notification." });
+                    }
 
+                    var customerEmail = fullCarSale.Customer?.Email;
+                    var customerFullName = fullCarSale.Customer?.FullName;
+                    var customerMobile = fullCarSale.Customer?.Mobile;
+                    var carName = $"{fullCarSale.StoreListing.CarListing.Model.CarManufacturer.Name} {fullCarSale.StoreListing.CarListing.Model.Name}";
+                    var depositAmountFormatted = fullCarSale.DepositAmount + " VND";
+                    DateTime? paymentDueDateForEmail = fullCarSale.ExpectedDeliveryDate?.AddDays(-10);
 
-                var emailSubject = $"Deposit Confirmation for Car {carName} - Order #{fullCarSale.OrderNumber}";
-                var emailBody = $@"
-                    <!DOCTYPE html>
-                    <html lang=""en"">
-                    <head>
-                        <meta charset=""UTF-8"">
-                        <meta name=""viewport"" content=""width=device-width, initial-scale=1.0"">
-                        <title>Deposit Confirmation</title>
-                        <style>
-                            body {{ font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f4f4f4; margin: 0; padding: 0; }}
-                            .container {{ width: 100%; max-width: 600px; margin: 20px auto; background-color: #ffffff; border-radius: 8px; box-shadow: 0 4px 8px rgba(0,0,0,0.05); overflow: hidden; }}
-                            .header {{ background-color: #4CAF50; color: #ffffff; padding: 20px; text-align: center; }}
-                            .header h1 {{ margin: 0; font-size: 24px; }}
-                            .content {{ padding: 20px 30px; line-height: 1.6; color: #333333; }}
-                            .content p {{ margin-bottom: 15px; }}
-                            .highlight {{ background-color: #e8f5e9; padding: 15px; border-left: 5px solid #4CAF50; margin: 20px 0; border-radius: 4px; }}
-                            .highlight ul {{ list-style: none; padding: 0; margin: 0; }}
-                            .highlight ul li {{ margin-bottom: 8px; }}
-                            .highlight ul li strong {{ color: #2e7d32; }}
-                            .footer {{ background-color: #f0f0f0; padding: 15px; text-align: center; font-size: 12px; color: #666666; border-top: 1px solid #e0e0e0; }}
-                            .button {{ display: inline-block; background-color: #2196F3; color: #ffffff; padding: 10px 20px; text-decoration: none; border-radius: 5px; margin-top: 20px; }}
-                        </style>
-                    </head>
-                    <body>
-                        <div class=""container"">
-                            <div class=""header"">
-                                <h1>Deposit Payment Successful!</h1>
-                            </div>
-                            <div class=""content"">
-                                <p>Dear <strong>{customerFullName}</strong>,</p>
-                                <p>We are pleased to confirm that your deposit payment for order <strong>#{fullCarSale.OrderNumber}</strong> has been successfully processed.</p>
-
-                                <div class=""highlight"">
-                                    <p><strong>Your Deposit Details:</strong></p>
-                                    <ul>
-                                        <li><strong>Vehicle:</strong> {carName}</li>
-                                        <li><strong>Order Number:</strong> <strong>{fullCarSale.OrderNumber}</strong></li>
-                                        <li><strong>Deposit Amount:</strong> <strong>{depositAmountFormatted}</strong></li>
-                                        <li><strong>Payment Method:</strong> {fullCarSale.DepositPayment?.PaymentMethod ?? "N/A"}</li>
-                                        <li><strong>Deposit Date:</strong> {fullCarSale.DepositPayment?.DateOfPayment.ToString("dd/MM/yyyy HH:mm") ?? "N/A"}</li>
-                                        <li><strong>Total Vehicle Value:</strong> {fullCarSale.FinalPrice.ToString("N0")} VND</li>
-                                        <li><strong>Remaining Balance:</strong> {fullCarSale.RemainingBalance?.ToString("N0") ?? "0"} VND</li>
-                                        <li><strong>Estimated Delivery Date:</strong> {fullCarSale.ExpectedDeliveryDate?.ToString("dd/MM/yyyy") ?? "N/A"}</li>
-                                        <li><strong>Full Payment Due Date:</strong> {paymentDueDateForEmail?.ToString("dd/MM/yyyy") ?? "N/A"}</li>
-                                    </ul>
+                    var emailSubject = $"Deposit Confirmation for Car {carName} - Order #{fullCarSale.OrderNumber}";
+                    var emailBody = $@"
+                        <!DOCTYPE html>
+                        <html lang=""en"">
+                        <head>
+                            <meta charset=""UTF-8"">
+                            <meta name=""viewport"" content=""width=device-width, initial-scale=1.0"">
+                            <title>Deposit Confirmation</title>
+                            <style>
+                                body {{ font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f4f4f4; margin: 0; padding: 0; }}
+                                .container {{ width: 100%; max-width: 600px; margin: 20px auto; background-color: #ffffff; border-radius: 8px; box-shadow: 0 4px 8px rgba(0,0,0,0.05); overflow: hidden; }}
+                                .header {{ background-color: #4CAF50; color: #ffffff; padding: 20px; text-align: center; }}
+                                .header h1 {{ margin: 0; font-size: 24px; }}
+                                .content {{ padding: 20px 30px; line-height: 1.6; color: #333333; }}
+                                .content p {{ margin-bottom: 15px; }}
+                                .highlight {{ background-color: #e8f5e9; padding: 15px; border-left: 5px solid #4CAF50; margin: 20px 0; border-radius: 4px; }}
+                                .highlight ul {{ list-style: none; padding: 0; margin: 0; }}
+                                .highlight ul li {{ margin-bottom: 8px; }}
+                                .highlight ul li strong {{ color: #2e7d32; }}
+                                .footer {{ background-color: #f0f0f0; padding: 15px; text-align: center; font-size: 12px; color: #666666; border-top: 1px solid #e0e0e0; }}
+                            </style>
+                        </head>
+                        <body>
+                            <div class=""container"">
+                                <div class=""header"">
+                                    <h1>Deposit Payment Successful!</h1>
                                 </div>
+                                <div class=""content"">
+                                    <p>Dear <strong>{customerFullName}</strong>,</p>
+                                    <p>We are pleased to confirm that your deposit payment for order <strong>#{fullCarSale.OrderNumber}</strong> has been successfully processed.</p>
 
-                                <p>Our sales team will contact you shortly to finalize the purchase agreement and remaining payment procedures.</p>
-                                <p>If you have any questions, please do not hesitate to contact us.</p>
-                                <p>Sincerely,</p>
-                                <p><strong>AutoSaleDN Team</strong></p>
-                            </div>
-                            <div class=""footer"">
-                                <p>&copy; {DateTime.Now.Year} AutoSaleDN. All rights reserved.</p>
-                            </div>
-                        </div>
-                    </body>
-                    </html>
-                ";
+                                    <div class=""highlight"">
+                                        <p><strong>Your Deposit Details:</strong></p>
+                                        <ul>
+                                            <li><strong>Vehicle:</strong> {carName}</li>
+                                            <li><strong>Order Number:</strong> <strong>{fullCarSale.OrderNumber}</strong></li>
+                                            <li><strong>Deposit Amount:</strong> <strong>{depositAmountFormatted}</strong></li>
+                                            <li><strong>Payment Method:</strong> {fullCarSale.DepositPayment?.PaymentMethod ?? "N/A"}</li>
+                                            <li><strong>Deposit Date:</strong> {fullCarSale.DepositPayment?.DateOfPayment.ToString("dd/MM/yyyy HH:mm") ?? "N/A"}</li>
+                                            <li><strong>Total Vehicle Value:</strong> {fullCarSale.FinalPrice.ToString("N0")} VND</li>
+                                            <li><strong>Remaining Balance:</strong> {fullCarSale.RemainingBalance?.ToString("N0") ?? "0"} VND</li>
+                                            <li><strong>Estimated Delivery Date:</strong> {fullCarSale.ExpectedDeliveryDate?.ToString("dd/MM/yyyy") ?? "N/A"}</li>
+                                            <li><strong>Full Payment Due Date:</strong> {paymentDueDateForEmail?.ToString("dd/MM/yyyy") ?? "N/A"}</li>
+                                        </ul>
+                                    </div>
 
-                // Simulate sending email
-                if (!string.IsNullOrEmpty(customerEmail))
-                {
-                    try
+                                    <p>Our sales team will contact you shortly to finalize the purchase agreement and remaining payment procedures.</p>
+                                    <p>If you have any questions, please do not hesitate to contact us.</p>
+                                    <p>Sincerely,</p>
+                                    <p><strong>AutoSaleDN Team</strong></p>
+                                </div>
+                                <div class=""footer"">
+                                    <p>&copy; {DateTime.Now.Year} AutoSaleDN. All rights reserved.</p>
+                                </div>
+                            </div>
+                        </body>
+                        </html>
+                    ";
+
+                    if (!string.IsNullOrEmpty(customerEmail))
                     {
-                        await _emailService.SendEmailAsync(customerEmail, emailSubject, emailBody);
-                        Console.WriteLine($"Email sent successfully to: {customerEmail}");
+                        try
+                        {
+                            await _emailService.SendEmailAsync(customerEmail, emailSubject, emailBody);
+                            Console.WriteLine($"Email sent successfully to: {customerEmail}");
+                        }
+                        catch (Exception emailEx)
+                        {
+                            Console.WriteLine($"Failed to send email to {customerEmail}: {emailEx.Message}");
+                        }
                     }
-                    catch (Exception emailEx)
+
+                    if (!string.IsNullOrEmpty(customerMobile))
                     {
-                        Console.WriteLine($"Failed to send email to {customerEmail}: {emailEx.Message}");
-                        // Optionally, log this error to a dedicated logging system
+                        var smsMessage = $"AutoSaleDN: Order #{fullCarSale.OrderNumber} deposit {depositAmountFormatted} successful. Remaining: {fullCarSale.RemainingBalance?.ToString("N0")} VND. Est. Delivery: {fullCarSale.ExpectedDeliveryDate?.ToString("dd/MM/yyyy")}. Full Payment Due: {paymentDueDateForEmail?.ToString("dd/MM/yyyy")}.";
+                        Console.WriteLine($"Simulating SMS to: {customerMobile}");
+                        Console.WriteLine($"Message: {smsMessage}");
                     }
                 }
 
-                // Simulate sending SMS
-                if (!string.IsNullOrEmpty(customerMobile))
-                {
-                    var smsMessage = $"AutoSaleDN: Order #{fullCarSale.OrderNumber} deposit {depositAmountFormatted} successful. Remaining: {fullCarSale.RemainingBalance?.ToString("N0")} VND. Est. Delivery: {fullCarSale.ExpectedDeliveryDate?.ToString("dd/MM/yyyy")}. Full Payment Due: {paymentDueDateForEmail?.ToString("dd/MM/yyyy")}.";
-                    // In a real application, you would use an actual SMS sending service here.
-                    // Example: _smsService.SendSmsAsync(customerMobile, smsMessage);
-                    Console.WriteLine($"Simulating SMS to: {customerMobile}");
-                    Console.WriteLine($"Message: {smsMessage}");
-                }
-
-                // --- END: NEW LOGIC FOR EMAIL AND SMS NOTIFICATIONS ---
-
-                // Calculate payment due date (e.g., 10 days before expected delivery)
                 DateTime? paymentDueDate = carSale.ExpectedDeliveryDate?.AddDays(-10);
 
                 return Ok(new
@@ -529,7 +517,8 @@ namespace AutoSaleDN.Controllers
                     orderNumber = carSale.OrderNumber,
                     depositPaymentId = depositPayment.PaymentId,
                     expectedDeliveryDate = carSale.ExpectedDeliveryDate,
-                    paymentDueDate = paymentDueDate // Return calculated payment due date
+                    paymentDueDate = paymentDueDate,
+                    paymentGatewayRedirect = (dto.DepositPaymentMethod == "e_wallet_momo_test" || dto.DepositPaymentMethod == "e_wallet_vnpay_test") // Indicate if frontend needs to redirect
                 });
             }
             catch (UnauthorizedAccessException ex)
@@ -538,44 +527,11 @@ namespace AutoSaleDN.Controllers
             }
             catch (Exception ex)
             {
-                // Log the exception details for debugging
                 Console.WriteLine($"Error in CreateDepositOrder: {ex.Message}");
                 Console.WriteLine($"Stack Trace: {ex.StackTrace}");
                 return StatusCode(500, new { message = $"Internal server error: {ex.Message}" });
             }
         }
-
-
-        // DTO for CreateDepositOrder
-        public class CreateDepositOrderDto
-        {
-            [Required]
-            public int ListingId { get; set; } // The CarListing ID
-            [Required]
-            public decimal TotalPrice { get; set; } // Total price of the car including fees/taxes
-            [Required]
-            public decimal DepositAmount { get; set; }
-            [Required]
-            public string DeliveryOption { get; set; } = null!; // "pickup" or "shipping"
-            public int? SelectedShowroomId { get; set; } // Required if DeliveryOption is "pickup"
-            public bool UseUserProfileAddress { get; set; } // True if using user's default address
-            public ShippingAddressInfoDto? ShippingAddressInfo { get; set; } // If not using user profile address
-            [Required]
-            public string DepositPaymentMethod { get; set; } = null!; // e.g., "bank_transfer", "e_wallet_vnpay_test", "installment_plan"
-            public DateTime? ExpectedDeliveryDate { get; set; } // Expected delivery date from frontend
-        }
-
-        // DTO for ShippingAddressInfo (nested in CreateDepositOrderDto)
-        public class ShippingAddressInfoDto
-        {
-            [Required]
-            public string Name { get; set; } = null!;
-            [Required]
-            public string Address { get; set; } = null!;
-            [Required]
-            public string Phone { get; set; } = null!;
-        }
-
 
         // NEW API: Process full payment for an existing order
         [HttpPost("orders/{orderId}/full-payment")]
@@ -586,7 +542,7 @@ namespace AutoSaleDN.Controllers
                 var userId = GetUserId();
 
                 var carSale = await _context.CarSales
-                                            .Include(cs => cs.SaleStatus) // Include SaleStatus to check current status
+                                            .Include(cs => cs.SaleStatus)
                                             .FirstOrDefaultAsync(cs => cs.SaleId == orderId && cs.CustomerId == userId);
 
                 if (carSale == null)
@@ -594,168 +550,152 @@ namespace AutoSaleDN.Controllers
                     return NotFound(new { message = "Order not found or unauthorized." });
                 }
 
-                // Check if deposit was required and paid
                 if (carSale.OrderType == "deposit_first" && carSale.SaleStatus?.StatusName != "Deposit Paid" && carSale.SaleStatus?.StatusName != "Pending Full Payment")
                 {
                     return BadRequest(new { message = "Deposit has not been paid for this order, or order is not in a state ready for full payment." });
                 }
 
-                // Check if full payment is already complete
                 if (carSale.SaleStatus?.StatusName == "Payment Complete" || carSale.SaleStatus?.StatusName == "Delivered")
                 {
                     return BadRequest(new { message = "Full payment for this order has already been processed or order is completed." });
                 }
 
-                // Get SaleStatus for "Payment Complete"
-                var paymentCompleteStatus = await _context.SaleStatus.FirstOrDefaultAsync(s => s.StatusName == "Payment Complete");
-                if (paymentCompleteStatus == null)
-                {
-                    return StatusCode(500, new { message = "Sale status 'Payment Complete' not found in database. Please ensure it is seeded." });
-                }
-
                 // Create Payment record for full payment
+                // Set PaymentStatus to "pending" if using external gateway like Momo/VNPay
                 var fullPayment = new Payment
                 {
                     UserId = userId,
-                    ListingId = carSale.StoreListing.ListingId, // Link to CarListing via StoreListing
-                    PaymentForSaleId = carSale.SaleId, // Link to the CarSale record
-                    TransactionId = $"FULL-{Guid.NewGuid().ToString().Substring(0, 8).ToUpper()}", // Unique transaction ID
-                    Amount = carSale.RemainingBalance ?? carSale.FinalPrice, // Pay remaining balance or full price if no deposit
+                    ListingId = carSale.StoreListing.ListingId,
+                    PaymentForSaleId = carSale.SaleId,
+                    TransactionId = $"FULL-{Guid.NewGuid().ToString().Substring(0, 8).ToUpper()}",
+                    Amount = carSale.RemainingBalance ?? carSale.FinalPrice,
                     PaymentMethod = dto.PaymentMethod,
-                    PaymentStatus = "completed", // Assuming payment gateway will confirm status
+                    PaymentStatus = (dto.PaymentMethod == "e_wallet_momo_test" || dto.PaymentMethod == "e_wallet_vnpay_test") ? "pending" : "completed", // Set to pending if external gateway
                     PaymentPurpose = "full_payment",
                     DateOfPayment = DateTime.UtcNow,
                     CreatedAt = DateTime.UtcNow,
                     UpdatedAt = DateTime.UtcNow
                 };
                 _context.Payments.Add(fullPayment);
-                await _context.SaveChangesAsync(); // Save Payment to get PaymentId
-
-                // Update CarSale record
-                carSale.FullPaymentId = fullPayment.PaymentId;
-                carSale.SaleStatusId = paymentCompleteStatus.SaleStatusId;
-                carSale.RemainingBalance = 0; // Balance becomes zero after full payment
-                carSale.ActualDeliveryDate = dto.ActualDeliveryDate; // If actual delivery date is known at full payment
-                carSale.UpdatedAt = DateTime.UtcNow;
-
                 await _context.SaveChangesAsync();
 
-                // --- START: NEW LOGIC FOR EMAIL AND SMS NOTIFICATIONS FOR FULL PAYMENT ---
+                // Update CarSale record with FullPaymentId
+                carSale.FullPaymentId = fullPayment.PaymentId;
+                carSale.ActualDeliveryDate = dto.ActualDeliveryDate;
+                carSale.UpdatedAt = DateTime.UtcNow;
+                await _context.SaveChangesAsync();
 
-                // Fetch necessary details for email/SMS after saving carSale and fullPayment
-                var fullCarSale = await _context.CarSales
-                    .Include(cs => cs.Customer) // Include User for email/phone
-                    .Include(cs => cs.StoreListing)
-                        .ThenInclude(sl => sl.CarListing)
-                            .ThenInclude(cl => cl.Model)
-                                .ThenInclude(cm => cm.CarManufacturer)
-                    .Include(cs => cs.FullPayment) // Ensure full payment details are available
-                    .FirstOrDefaultAsync(cs => cs.SaleId == carSale.SaleId);
-
-                if (fullCarSale == null)
+                // --- NO EMAIL/SMS HERE FOR MOMO/VNPAY. IT WILL BE SENT FROM MOMO/VNPAY CALLBACK ---
+                // For other payment methods (e.g., bank transfer, installment plan), send email/SMS directly
+                if (dto.PaymentMethod != "e_wallet_momo_test" && dto.PaymentMethod != "e_wallet_vnpay_test")
                 {
-                    return StatusCode(500, new { message = "Failed to retrieve full order details for notification after full payment." });
-                }
+                    // Update CarSale status to "Payment Complete" for non-gateway payments
+                    var paymentCompleteStatus = await _context.SaleStatus.FirstOrDefaultAsync(s => s.StatusName == "Payment Complete");
+                    if (paymentCompleteStatus == null)
+                    {
+                        return StatusCode(500, new { message = "Sale status 'Payment Complete' not found in database. Please ensure it is seeded." });
+                    }
+                    carSale.SaleStatusId = paymentCompleteStatus.SaleStatusId;
+                    carSale.RemainingBalance = 0;
+                    carSale.UpdatedAt = DateTime.UtcNow;
+                    await _context.SaveChangesAsync();
 
-                // Prepare email content for full payment
-                var customerEmail = fullCarSale.Customer?.Email;
-                var customerFullName = fullCarSale.Customer?.FullName;
-                var customerMobile = fullCarSale.Customer?.Mobile;
-                var carName = $"{fullCarSale.StoreListing.CarListing.Model.CarManufacturer.Name} {fullCarSale.StoreListing.CarListing.Model.Name}";
-                var fullPaymentAmountFormatted = fullCarSale.FullPayment?.Amount.ToString("N0") + " VND"; // Format currency
+                    // Fetch necessary details for email/SMS after saving carSale and fullPayment
+                    var fullCarSale = await _context.CarSales
+                        .Include(cs => cs.Customer)
+                        .Include(cs => cs.StoreListing).ThenInclude(sl => sl.CarListing).ThenInclude(cl => cl.Model).ThenInclude(cm => cm.CarManufacturer)
+                        .Include(cs => cs.FullPayment)
+                        .FirstOrDefaultAsync(cs => cs.SaleId == carSale.SaleId);
 
-                var emailSubject = $"Full Payment Confirmation for Car {carName} - Order #{fullCarSale.OrderNumber}";
-                var emailBody = $@"
-                    <!DOCTYPE html>
-                    <html lang=""en"">
-                    <head>
-                        <meta charset=""UTF-8"">
-                        <meta name=""viewport"" content=""width=device-width, initial-scale=1.0"">
-                        <title>Full Payment Confirmation</title>
-                        <style>
-                            body {{ font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f4f4f4; margin: 0; padding: 0; }}
-                            .container {{ width: 100%; max-width: 600px; margin: 20px auto; background-color: #ffffff; border-radius: 8px; box-shadow: 0 4px 8px rgba(0,0,0,0.05); overflow: hidden; }}
-                            .header {{ background-color: #007bff; color: #ffffff; padding: 20px; text-align: center; }}
-                            .header h1 {{ margin: 0; font-size: 24px; }}
-                            .content {{ padding: 20px 30px; line-height: 1.6; color: #333333; }}
-                            .content p {{ margin-bottom: 15px; }}
-                            .highlight {{ background-color: #e0f2f7; padding: 15px; border-left: 5px solid #007bff; margin: 20px 0; border-radius: 4px; }}
-                            .highlight ul {{ list-style: none; padding: 0; margin: 0; }}
-                            .highlight ul li {{ margin-bottom: 8px; }}
-                            .highlight ul li strong {{ color: #0056b3; }}
-                            .footer {{ background-color: #f0f0f0; padding: 15px; text-align: center; font-size: 12px; color: #666666; border-top: 1px solid #e0e0e0; }}
-                            .button {{ display: inline-block; background-color: #2196F3; color: #ffffff; padding: 10px 20px; text-decoration: none; border-radius: 5px; margin-top: 20px; }}
-                        </style>
-                    </head>
-                    <body>
-                        <div class=""container"">
-                            <div class=""header"">
-                                <h1>Full Payment Successful!</h1>
-                            </div>
-                            <div class=""content"">
-                                <p>Dear <strong>{customerFullName}</strong>,</p>
-                                <p>We are pleased to confirm that your full payment for order <strong>#{fullCarSale.OrderNumber}</strong> has been successfully processed.</p>
+                    if (fullCarSale == null)
+                    {
+                        return StatusCode(500, new { message = "Failed to retrieve full order details for notification after full payment." });
+                    }
 
-                                <div class=""highlight"">
-                                    <p><strong>Your Full Payment Details:</strong></p>
-                                    <ul>
-                                        <li><strong>Vehicle:</strong> {carName}</li>
-                                        <li><strong>Order Number:</strong> <strong>{fullCarSale.OrderNumber}</strong></li>
-                                        <li><strong>Payment Amount:</strong> <strong>{fullPaymentAmountFormatted}</strong></li>
-                                        <li><strong>Payment Method:</strong> {fullCarSale.FullPayment?.PaymentMethod ?? "N/A"}</li>
-                                        <li><strong>Payment Date:</strong> {fullCarSale.FullPayment?.DateOfPayment.ToString("dd/MM/yyyy HH:mm") ?? "N/A"}</li>
-                                        <li><strong>Total Vehicle Value:</strong> {fullCarSale.FinalPrice.ToString("N0")} VND</li>
-                                        <li><strong>Remaining Balance:</strong> {fullCarSale.RemainingBalance?.ToString("N0") ?? "0"} VND (Now 0)</li>
-                                        <li><strong>Estimated Delivery Date:</strong> {fullCarSale.ExpectedDeliveryDate?.ToString("dd/MM/yyyy") ?? "N/A"}</li>
-                                        <li><strong>Actual Delivery Date:</strong> {fullCarSale.ActualDeliveryDate?.ToString("dd/MM/yyyy") ?? "Pending Confirmation"}</li>
-                                    </ul>
+                    var customerEmail = fullCarSale.Customer?.Email;
+                    var customerFullName = fullCarSale.Customer?.FullName;
+                    var carName = $"{fullCarSale.StoreListing.CarListing.Model.CarManufacturer.Name} {fullCarSale.StoreListing.CarListing.Model.Name}";
+                    var fullPaymentAmountFormatted = fullCarSale.FullPayment?.Amount.ToString("N0") + " VND";
+
+                    var emailSubject = $"Full Payment Confirmation for Car {carName} - Order #{fullCarSale.OrderNumber}";
+                    var emailBody = $@"
+                        <!DOCTYPE html>
+                        <html lang=""en"">
+                        <head>
+                            <meta charset=""UTF-8"">
+                            <meta name=""viewport"" content=""width=device-width, initial-scale=1.0"">
+                            <title>Full Payment Confirmation</title>
+                            <style>
+                                body {{ font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f4f4f4; margin: 0; padding: 0; }}
+                                .container {{ width: 100%; max-width: 600px; margin: 20px auto; background-color: #ffffff; border-radius: 8px; box-shadow: 0 4px 8px rgba(0,0,0,0.05); overflow: hidden; }}
+                                .header {{ background-color: #007bff; color: #ffffff; padding: 20px; text-align: center; }}
+                                .header h1 {{ margin: 0; font-size: 24px; }}
+                                .content {{ padding: 20px 30px; line-height: 1.6; color: #333333; }}
+                                .content p {{ margin-bottom: 15px; }}
+                                .highlight {{ background-color: #e0f2f7; padding: 15px; border-left: 5px solid #007bff; margin: 20px 0; border-radius: 4px; }}
+                                .highlight ul {{ list-style: none; padding: 0; margin: 0; }}
+                                .highlight ul li {{ margin-bottom: 8px; }}
+                                .highlight ul li strong {{ color: #0056b3; }}
+                                .footer {{ background-color: #f0f0f0; padding: 15px; text-align: center; font-size: 12px; color: #666666; border-top: 1px solid #e0e0e0; }}
+                            </style>
+                        </head>
+                        <body>
+                            <div class=""container"">
+                                <div class=""header"">
+                                    <h1>Full Payment Successful!</h1>
                                 </div>
+                                <div class=""content"">
+                                    <p>Dear <strong>{customerFullName}</strong>,</p>
+                                    <p>We are pleased to confirm that your full payment for order <strong>#{fullCarSale.OrderNumber}</strong> has been successfully processed.</p>
 
-                                <p>Your order is now fully paid. Our team will contact you regarding the delivery or pickup of your vehicle.</p>
-                                <p>If you have any questions, please do not hesitate to contact us.</p>
-                                <p>Sincerely,</p>
-                                <p><strong>AutoSaleDN Team</strong></p>
-                            </div>
-                            <div class=""footer"">
-                                <p>&copy; {DateTime.Now.Year} AutoSaleDN. All rights reserved.</p>
-                            </div>
-                        </div>
-                    </body>
-                    </html>
-                ";
+                                    <div class=""highlight"">
+                                        <p><strong>Your Full Payment Details:</strong></p>
+                                        <ul>
+                                            <li><strong>Vehicle:</strong> {carName}</li>
+                                            <li><strong>Order Number:</strong> <strong>{fullCarSale.OrderNumber}</strong></li>
+                                            <li><strong>Payment Amount:</strong> <strong>{fullPaymentAmountFormatted}</strong></li>
+                                            <li><strong>Payment Method:</strong> {fullCarSale.FullPayment?.PaymentMethod ?? "N/A"}</li>
+                                            <li><strong>Payment Date:</strong> {fullCarSale.FullPayment?.DateOfPayment.ToString("dd/MM/yyyy HH:mm") ?? "N/A"}</li>
+                                            <li><strong>Total Vehicle Value:</strong> {fullCarSale.FinalPrice.ToString("N0")} VND</li>
+                                            <li><strong>Remaining Balance:</strong> {fullCarSale.RemainingBalance?.ToString("N0") ?? "0"} VND (Now 0)</li>
+                                            <li><strong>Estimated Delivery Date:</strong> {fullCarSale.ExpectedDeliveryDate?.ToString("dd/MM/yyyy") ?? "N/A"}</li>
+                                            <li><strong>Actual Delivery Date:</strong> {fullCarSale.ActualDeliveryDate?.ToString("dd/MM/yyyy") ?? "Pending Confirmation"}</li>
+                                        </ul>
+                                    </div>
 
-                // Simulate sending email
-                if (!string.IsNullOrEmpty(customerEmail))
-                {
-                    try
+                                    <p>Your order is now fully paid. Our team will contact you regarding the delivery or pickup of your vehicle.</p>
+                                    <p>If you have any questions, please do not hesitate to contact us.</p>
+                                    <p>Sincerely,</p>
+                                    <p><strong>AutoSaleDN Team</strong></p>
+                                </div>
+                                <div class=""footer"">
+                                    <p>&copy; {DateTime.Now.Year} AutoSaleDN. All rights reserved.</p>
+                                </div>
+                            </div>
+                        </body>
+                        </html>
+                    ";
+
+                    if (!string.IsNullOrEmpty(customerEmail))
                     {
-                        await _emailService.SendEmailAsync(customerEmail, emailSubject, emailBody);
-                        Console.WriteLine($"Email sent successfully to: {customerEmail}");
-                    }
-                    catch (Exception emailEx)
-                    {
-                        Console.WriteLine($"Failed to send full payment email to {customerEmail}: {emailEx.Message}");
-                        // Optionally, log this error to a dedicated logging system
+                        try
+                        {
+                            await _emailService.SendEmailAsync(customerEmail, emailSubject, emailBody);
+                            Console.WriteLine($"Email sent successfully to: {customerEmail}");
+                        }
+                        catch (Exception emailEx)
+                        {
+                            Console.WriteLine($"Failed to send full payment email to {customerEmail}: {emailEx.Message}");
+                        }
                     }
                 }
-
-                // Simulate sending SMS
-                if (!string.IsNullOrEmpty(customerMobile))
-                {
-                    var smsMessage = $"AutoSaleDN: Order #{fullCarSale.OrderNumber} full payment {fullPaymentAmountFormatted} successful. Your car is now fully paid. Contact us for delivery/pickup.";
-                    // In a real application, you would use an actual SMS sending service here.
-                    // Example: _smsService.SendSmsAsync(customerMobile, smsMessage);
-                    Console.WriteLine($"Simulating SMS to: {customerMobile}");
-                    Console.WriteLine($"Message: {smsMessage}");
-                }
-
-                // --- END: NEW LOGIC FOR EMAIL AND SMS NOTIFICATIONS FOR FULL PAYMENT ---
 
                 return Ok(new
                 {
                     message = "Full payment processed successfully.",
                     orderId = carSale.SaleId,
-                    paymentId = fullPayment.PaymentId
+                    paymentId = fullPayment.PaymentId,
+                    paymentGatewayRedirect = (dto.PaymentMethod == "e_wallet_momo_test" || dto.PaymentMethod == "e_wallet_vnpay_test") // Indicate if frontend needs to redirect
                 });
             }
             catch (UnauthorizedAccessException ex)
@@ -770,69 +710,167 @@ namespace AutoSaleDN.Controllers
             }
         }
 
-        // DTO for ProcessFullPayment
+        // DTOs (unchanged)
+        public class CreateDepositOrderDto
+        {
+            [Required]
+            public int ListingId { get; set; }
+            [Required]
+            public decimal TotalPrice { get; set; }
+            [Required]
+            public decimal DepositAmount { get; set; }
+            [Required]
+            public string DeliveryOption { get; set; } = null!;
+            public int? SelectedShowroomId { get; set; }
+            public bool UseUserProfileAddress { get; set; }
+            public ShippingAddressInfoDto? ShippingAddressInfo { get; set; }
+            [Required]
+            public string DepositPaymentMethod { get; set; } = null!;
+            public DateTime? ExpectedDeliveryDate { get; set; }
+        }
+
+        public class ShippingAddressInfoDto
+        {
+            [Required]
+            public string Name { get; set; } = null!;
+            [Required]
+            public string Address { get; set; } = null!;
+            [Required]
+            public string Phone { get; set; } = null!;
+        }
+
         public class ProcessFullPaymentDto
         {
             [Required]
-            public string PaymentMethod { get; set; } = null!; // e.g., "bank_transfer", "e_wallet_vnpay_test", "installment_plan"
-            public DateTime? ActualDeliveryDate { get; set; } // Optional: if delivery date is confirmed at full payment
+            public string PaymentMethod { get; set; } = null!;
+            public DateTime? ActualDeliveryDate { get; set; }
         }
 
-
-        // Existing API: GetOrders - Updated to include more details
         [HttpGet("orders")]
-        public async Task<IActionResult> GetOrders([FromQuery] int? statusId = null)
+        public async Task<IActionResult> GetMyOrders([FromQuery] int? statusId = null)
         {
             try
             {
-                var userId = GetUserId();
-                // Break down the Include/ThenInclude chain for better type inference
-                var query = _context.CarSales.Where(s => s.CustomerId == userId);
+                // IMPORTANT: Implement GetUserId() properly based on your authentication setup.
+                // This usually involves reading claims from HttpContext.User.
+                var userId = GetUserId(); // Assuming this method correctly gets the current authenticated UserId
 
-                query = query.Include(cs => cs.SaleStatus);
-                query = query.Include(cs => cs.StoreListing)
-                             .ThenInclude(sl => sl.CarListing)
-                                 .ThenInclude(cl => cl.Model)
-                                     .ThenInclude(cm => cm.CarManufacturer);
-                query = query.Include(cs => cs.ShippingAddress);
-                query = query.Include(cs => cs.PickupStoreLocation);
-                query = query.Include(cs => cs.DepositPayment);
-                query = query.Include(cs => cs.FullPayment);
+                if (userId == 0)
+                {
+                    return Unauthorized(new { message = "User not authenticated or user ID is invalid." });
+                }
+
+                var query = _context.CarSales
+                    .Where(s => s.CustomerId == userId);
+
+                // Break down the Include/ThenInclude chain for better type inference and readability
+                query = query
+                    .Include(cs => cs.SaleStatus)
+                    .Include(cs => cs.StoreListing)
+                        .ThenInclude(sl => sl.CarListing)
+                            .ThenInclude(cl => cl.Model)
+                                .ThenInclude(cm => cm.CarManufacturer)
+                    .Include(cs => cs.StoreListing)
+                        .ThenInclude(sl => sl.CarListing)
+                            .ThenInclude(cl => cl.CarImages) // Include images for car details
+                    .Include(cs => cs.StoreListing) // Added to include Specifications
+                        .ThenInclude(sl => sl.CarListing)
+                            .ThenInclude(cl => cl.Specifications) // Include specifications for car details
+                    .Include(cs => cs.ShippingAddress)
+                    .Include(cs => cs.PickupStoreLocation)
+                    .Include(cs => cs.DepositPayment)
+                    .Include(cs => cs.FullPayment);
 
                 if (statusId.HasValue)
+                {
                     query = query.Where(s => s.SaleStatusId == statusId.Value);
+                }
 
                 var orders = await query
-                                    .OrderByDescending(cs => cs.CreatedAt)
-                                    .Select(cs => new
-                                    {
-                                        cs.SaleId,
-                                        cs.OrderNumber,
-                                        CarName = $"{cs.StoreListing.CarListing.Model.CarManufacturer.Name} {cs.StoreListing.CarListing.Model.Name}",
-                                        cs.FinalPrice,
-                                        cs.DepositAmount,
-                                        cs.RemainingBalance,
-                                        Status = cs.SaleStatus.StatusName,
-                                        cs.DeliveryOption,
-                                        ShippingAddress = cs.ShippingAddress != null ? $"{cs.ShippingAddress.Address}, {cs.ShippingAddress.RecipientName ?? ""}" : null,
-                                        PickupLocation = cs.PickupStoreLocation != null ? $"{cs.PickupStoreLocation.Name}, {cs.PickupStoreLocation.Address}" : null,
-                                        cs.ExpectedDeliveryDate,
-                                        cs.ActualDeliveryDate,
-                                        DepositPaymentMethod = cs.DepositPayment != null ? cs.DepositPayment.PaymentMethod : null,
-                                        FullPaymentMethod = cs.FullPayment != null ? cs.FullPayment.PaymentMethod : null,
-                                        cs.OrderType,
-                                        cs.CreatedAt
-                                    })
-                                    .ToListAsync();
+                    .OrderByDescending(cs => cs.CreatedAt)
+                    .Select(cs => new
+                    {
+                        // Basic Order Details
+                        OrderId = cs.SaleId, // Renamed to OrderId for clarity as per frontend
+                        cs.OrderNumber,
+                        cs.FinalPrice,
+                        cs.DepositAmount,
+                        cs.RemainingBalance,
+                        OrderDate = cs.CreatedAt, // Use CreatedAt as OrderDate
+                        cs.DeliveryOption,
+                        cs.ExpectedDeliveryDate,
+                        cs.ActualDeliveryDate,
+                        cs.OrderType,
+
+                        // Car Details - Nested Object
+                        CarDetails = cs.StoreListing.CarListing != null ? new
+                        {
+                            ListingId = cs.StoreListing.CarListing.ListingId,
+                            Make = cs.StoreListing.CarListing.Model.CarManufacturer.Name,
+                            Model = cs.StoreListing.CarListing.Model.Name,
+                            Year = cs.StoreListing.CarListing.Year,
+                            Mileage = cs.StoreListing.CarListing.Mileage,
+                            Condition = cs.StoreListing.CarListing.Condition,
+                            Engine = cs.StoreListing.CarListing.Specifications != null && cs.StoreListing.CarListing.Specifications.Any() ? cs.StoreListing.CarListing.Specifications.FirstOrDefault().Engine : null,
+                            Transmission = cs.StoreListing.CarListing.Specifications != null && cs.StoreListing.CarListing.Specifications.Any() ? cs.StoreListing.CarListing.Specifications.FirstOrDefault().Transmission : null,
+                            FuelType = cs.StoreListing.CarListing.Specifications != null && cs.StoreListing.CarListing.Specifications.Any() ? cs.StoreListing.CarListing.Specifications.FirstOrDefault().FuelType : null,
+                            ImageUrl = cs.StoreListing.CarListing.CarImages.FirstOrDefault().Url // Assuming CarImages is a collection
+                        } : null,
+
+                        // Sale Status Display Logic (matching frontend)
+                        CurrentSaleStatus = (cs.SaleStatus != null) ?
+                            (cs.SaleStatus.StatusName == "Available" || cs.SaleStatus.StatusName == "Pending Deposit" ? "Available" : // Pending Deposit -> Available
+                             cs.SaleStatus.StatusName == "Sold" ? "Sold" :
+                             cs.SaleStatus.StatusName == "On Hold" ? "On Hold" :
+                             cs.SaleStatus.StatusName == "Deposit Paid" || cs.SaleStatus.StatusName == "Pending Full Payment" ? "Deposit Paid" : // Pending Full Payment -> Deposit Paid
+                             cs.SaleStatus.StatusName == "Payment Complete" ? "Sold" : // Payment Complete -> Sold
+                             cs.SaleStatus.StatusName) // Default to original status if not mapped
+                             : "Available", // Default if no status
+
+                        // Payment Details - Nested Objects
+                        DepositPaymentDetails = cs.DepositPayment != null ? new
+                        {
+                            cs.DepositPayment.PaymentId,
+                            cs.DepositPayment.Amount,
+                            cs.DepositPayment.PaymentMethod,
+                            PaymentStatus = cs.DepositPayment.PaymentStatus, // Corrected field name
+                            DateOfPayment = cs.DepositPayment.DateOfPayment // Corrected field name
+                        } : null,
+                        FullPaymentDetails = cs.FullPayment != null ? new
+                        {
+                            cs.FullPayment.PaymentId,
+                            cs.FullPayment.Amount,
+                            cs.FullPayment.PaymentMethod,
+                            PaymentStatus = cs.FullPayment.PaymentStatus, // Corrected field name
+                            DateOfPayment = cs.FullPayment.DateOfPayment // Corrected field name
+                        } : null,
+
+                        // Delivery/Pickup Details - Nested Objects
+                        ShippingAddressDetails = cs.ShippingAddress != null ? new
+                        {
+                            cs.ShippingAddress.AddressId,
+                            cs.ShippingAddress.RecipientName,
+                            cs.ShippingAddress.Address,
+                        } : null,
+                        PickupLocationDetails = cs.PickupStoreLocation != null ? new
+                        {
+                            cs.PickupStoreLocation.StoreLocationId,
+                            cs.PickupStoreLocation.Name,
+                            cs.PickupStoreLocation.Address,
+                        } : null,
+                    })
+                    .ToListAsync();
+
                 return Ok(orders);
             }
             catch (UnauthorizedAccessException ex)
             {
+                // This catch block is for when GetUserId() throws UnauthorizedAccessException
                 return Unauthorized(new { message = ex.Message });
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"Error in GetOrders: {ex.Message}");
+                Console.WriteLine($"Error in GetMyOrders: {ex.Message}");
                 Console.WriteLine($"Stack Trace: {ex.StackTrace}");
                 return StatusCode(500, new { message = $"Internal server error: {ex.Message}" });
             }

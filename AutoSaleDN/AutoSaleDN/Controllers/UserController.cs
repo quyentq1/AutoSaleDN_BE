@@ -199,8 +199,9 @@ public class UserController : ControllerBase
                 .ThenInclude(clf => clf.Feature)
             .Include(c => c.CarServiceHistories)
             .Include(c => c.CarPricingDetails)
-            .Include(c => c.CarSales)
-                .ThenInclude(s => s.SaleStatus)
+            .Include(c => c.StoreListings)
+                .ThenInclude(sl => sl.CarSales)
+                    .ThenInclude(cs => cs.SaleStatus)
             .Include(c => c.Reviews)
                 .ThenInclude(r => r.User)
             .Include(c => c.StoreListings)
@@ -231,11 +232,9 @@ public class UserController : ControllerBase
         }
         if (discountedCars.HasValue && discountedCars.Value)
         {
-            // Implement discount logic if applicable
         }
         if (premiumPartners.HasValue && premiumPartners.Value)
         {
-            // Implement premium partner logic if applicable
         }
         if (registrationFrom.HasValue)
         {
@@ -280,11 +279,24 @@ public class UserController : ControllerBase
                 query = query.Where(c => c.CarListingFeatures.Any(clf => clf.Feature.Name == featureName));
             }
         }
+
+        query = query.Where(c =>
+
+        !c.StoreListings.Any() ||
+        c.StoreListings
+            .SelectMany(sl => sl.CarSales)
+            .OrderByDescending(s => s.CreatedAt)
+            .FirstOrDefault() == null ||
+        c.StoreListings
+            .SelectMany(sl => sl.CarSales)
+            .OrderByDescending(s => s.CreatedAt)
+            .FirstOrDefault()
+            .SaleStatus.StatusName != "Payment Complete"
+            );
         query = query.OrderByDescending(c => c.DatePosted);
 
         var totalResults = await query.CountAsync();
 
-        // Apply Pagination
         var carsToSkip = (page - 1) * perPage;
         query = query.Skip(carsToSkip).Take(perPage);
 
@@ -362,11 +374,16 @@ public class UserController : ControllerBase
                     cs.StoreLocation.StoreLocationId,
                     cs.StoreLocation.Name,
                     cs.StoreLocation.Address,
-                }) : null
+                }) : null,
+                currentSaleStatus = c.StoreListings
+                .SelectMany(sl => sl.CarSales)
+                .OrderByDescending(s => s.CreatedAt)
+                .Select(s => s.SaleStatus.StatusName)
+                .FirstOrDefault() ?? "Available"
             })
             .ToListAsync();
         var totalPages = (int)Math.Ceiling((double)totalResults / perPage);
-        if (totalPages == 0 && totalResults > 0) totalPages = 1; // Ensure at least 1 page if there are results
+        if (totalPages == 0 && totalResults > 0) totalPages = 1;
 
         return Ok(new
         {
@@ -389,8 +406,15 @@ public class UserController : ControllerBase
                 .ThenInclude(clf => clf.Feature)
             .Include(c => c.CarServiceHistories)
             .Include(c => c.CarPricingDetails)
-            .Include(c => c.CarSales)
-                .ThenInclude(clf => clf.SaleStatus)
+            .Include(c => c.StoreListings)
+                .ThenInclude(sl => sl.CarSales)
+                    .ThenInclude(cs => cs.SaleStatus)
+            .Include(c => c.StoreListings)
+                .ThenInclude(sl => sl.CarSales)
+                    .ThenInclude(cs => cs.DepositPayment)
+            .Include(c => c.StoreListings)
+                .ThenInclude(sl => sl.CarSales)
+                    .ThenInclude(cs => cs.FullPayment)
             .Include(c => c.Reviews)
                 .ThenInclude(r => r.User)
             .Include(c => c.StoreListings)
@@ -399,6 +423,47 @@ public class UserController : ControllerBase
 
         if (car == null)
             return NotFound(new { message = "Car not found." });
+
+        var allCarSalesForThisCar = car.StoreListings?
+            .SelectMany(sl => sl.CarSales ?? new List<CarSale>())
+            .ToList();
+
+        var latestRelevantSale = allCarSalesForThisCar?
+        .OrderByDescending(s => s.CreatedAt)
+        .FirstOrDefault(s =>
+            s.SaleStatus?.StatusName == "Deposit Paid" ||
+            s.SaleStatus?.StatusName == "Payment Complete" ||
+            s.SaleStatus?.StatusName == "Pending Deposit" ||
+            s.SaleStatus?.StatusName == "Pending Full Payment"
+        );
+
+        string saleStatusDisplay = "Available";
+        string paymentStatusDisplay = null;
+
+        if (latestRelevantSale != null)
+        {
+            if (latestRelevantSale.SaleStatus?.StatusName == "Payment Complete")
+            {
+                saleStatusDisplay = "Sold";
+                paymentStatusDisplay = "Full Payment Made";
+            }
+            else if (latestRelevantSale.SaleStatus?.StatusName == "Deposit Paid")
+            {
+                saleStatusDisplay = "On Hold";
+                paymentStatusDisplay = "Deposit Made";
+            }
+            else if (latestRelevantSale.SaleStatus?.StatusName == "Pending Deposit")
+            {
+                saleStatusDisplay = "Pending Deposit";
+                paymentStatusDisplay = "Pending Deposit Payment";
+            }
+            else if (latestRelevantSale.SaleStatus?.StatusName == "Pending Full Payment")
+            {
+                saleStatusDisplay = "Pending Full Payment";
+                paymentStatusDisplay = "Pending Full Payment";
+            }
+        }
+
 
         var carDetail = new
         {
@@ -478,7 +543,9 @@ public class UserController : ControllerBase
                 cs.StoreLocation.StoreLocationId,
                 cs.StoreLocation.Name,
                 cs.StoreLocation.Address,
-            }) : null
+            }) : null,
+            CurrentSaleStatus = saleStatusDisplay,
+            CurrentPaymentStatus = paymentStatusDisplay
         };
 
         return Ok(carDetail);
