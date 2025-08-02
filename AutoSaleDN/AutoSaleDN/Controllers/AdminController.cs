@@ -561,7 +561,6 @@ namespace AutoSaleDN.Controllers
             using var transaction = await _context.Database.BeginTransactionAsync();
             try
             {
-                // 1. Kiểm tra tính hợp lệ của StoreLocationId trước
                 var storeLocationExists = await _context.StoreLocations.AnyAsync(s => s.StoreLocationId == dto.StoreLocationId);
                 if (!storeLocationExists)
                 {
@@ -573,33 +572,6 @@ namespace AutoSaleDN.Controllers
                     });
                 }
 
-                // 2. Kiểm tra xem đã có một xe cùng ModelId đang là IsCurrent tại StoreLocation này chưa
-                var existingCurrentStoreListing = await _context.StoreListings
-                    .Where(sl => sl.StoreLocationId == dto.StoreLocationId && sl.IsCurrent == true)
-                    .Join(_context.CarListings,
-                          sl => sl.ListingId,
-                          cl => cl.ListingId,
-                          (sl, cl) => new { sl, cl })
-                    .FirstOrDefaultAsync(joined => joined.cl.ModelId == dto.ModelId);
-
-                if (existingCurrentStoreListing != null)
-                {
-                    var modelName = await _context.CarModels // Sử dụng DbSet CarModels của bạn
-                                              .Where(m => m.ModelId == dto.ModelId)
-                                              .Select(m => m.Name)
-                                              .FirstOrDefaultAsync();
-
-                    var displayModel = string.IsNullOrEmpty(modelName) ? $"ID {dto.ModelId}" : modelName;
-
-                    await transaction.RollbackAsync();
-                    return BadRequest(new
-                    {
-                        success = false,
-                        message = $"A car of model '{displayModel}' is already listed as current at store location ID {dto.StoreLocationId}. Only one listing of the same model can be current per showroom."
-                    });
-                }
-
-                // 3. Tạo CarListing
                 var car = new CarListing
                 {
                     ModelId = dto.ModelId,
@@ -616,17 +588,12 @@ namespace AutoSaleDN.Controllers
                     DateUpdated = DateTime.Now
                 };
                 _context.CarListings.Add(car);
-                // *** CALL SAVECHANGESASYNC HERE TO POPULATE car.ListingId ***
                 await _context.SaveChangesAsync();
 
-                // Now car.ListingId will have the database-generated ID,
-                // which can be used for related entities.
-
-                // 4. Tạo CarSpecification
                 var spec = new CarSpecification
                 {
-                    ListingId = car.ListingId, // Now ListingId is known
-                    ExteriorColor = dto.ColorId.ToString(),
+                    ListingId = car.ListingId,
+                    ExteriorColor = dto.Color,
                     InteriorColor = dto.InteriorColor,
                     Transmission = dto.Transmission,
                     Engine = dto.Engine,
@@ -636,42 +603,38 @@ namespace AutoSaleDN.Controllers
                 };
                 _context.CarSpecifications.Add(spec);
 
-                // 5. Tạo CarPricingDetail
                 var pricing = new CarPricingDetail
                 {
-                    ListingId = car.ListingId, // Now ListingId is known
+                    ListingId = car.ListingId,
                     RegistrationFee = Math.Round(dto.RegistrationFee, 2),
                     TaxRate = Math.Round(dto.TaxRate, 2)
                 };
                 _context.CarPricingDetails.Add(pricing);
 
-                // 6. Thêm Car Images
                 if (dto.ImageUrls != null && dto.ImageUrls.Any())
                 {
                     foreach (var url in dto.ImageUrls)
                     {
                         _context.CarImages.Add(new CarImage
                         {
-                            ListingId = car.ListingId, // Now ListingId is known
+                            ListingId = car.ListingId,
                             Url = url
                         });
                     }
                 }
 
-                // 7. Thêm Features
                 if (dto.FeatureIds != null && dto.FeatureIds.Any())
                 {
                     foreach (var featureId in dto.FeatureIds)
                     {
                         _context.CarListingFeatures.Add(new CarListingFeature
                         {
-                            ListingId = car.ListingId, // Now ListingId is known
+                            ListingId = car.ListingId,
                             FeatureId = featureId
                         });
                     }
                 }
 
-                // 8. Thêm Car Videos
                 if (dto.VideoUrls != null && dto.VideoUrls.Any())
                 {
                     foreach (var url in dto.VideoUrls)
@@ -685,7 +648,6 @@ namespace AutoSaleDN.Controllers
                     }
                 }
 
-                // 9. Tạo StoreListing
                 var storeListing = new StoreListing
                 {
                     ListingId = car.ListingId,
@@ -697,10 +659,8 @@ namespace AutoSaleDN.Controllers
                 };
                 _context.StoreListings.Add(storeListing);
 
-                // *** SAVE CHANGES AGAIN TO GET storeListing.StoreListingId ***
                 await _context.SaveChangesAsync();
 
-                // 10. Tạo CarInventory (AFTER StoreListing is saved and has ID)
                 if (!car.Price.HasValue)
                 {
                     await transaction.RollbackAsync();
@@ -709,7 +669,7 @@ namespace AutoSaleDN.Controllers
 
                 var inventoryLog = new CarInventory
                 {
-                    StoreListingId = storeListing.StoreListingId, // Now StoreListingId is available
+                    StoreListingId = storeListing.StoreListingId,
                     TransactionType = (int)InventoryTransactionType.StockImport,
                     Quantity = 1,
                     UnitPrice = car.Price.Value,
@@ -721,7 +681,6 @@ namespace AutoSaleDN.Controllers
                 };
                 _context.CarInventories.Add(inventoryLog);
 
-                // *** FINAL SAVE ***
                 await _context.SaveChangesAsync();
                 await transaction.CommitAsync();
 
@@ -740,13 +699,23 @@ namespace AutoSaleDN.Controllers
             }
         }
 
-            [HttpGet("storelocations")]
+        [HttpGet("storelocations")]
         public async Task<IActionResult> GetStoreLocations()
         {
             try
             {
-                var storeLocations = await _context.StoreLocations.ToListAsync();
-                return Ok(new { success = true, data = storeLocations });
+                var storeLocationsWithUsers = await _context.StoreLocations
+             .Join(
+                 _context.Users,
+                 storeLocation => storeLocation.StoreLocationId,
+                 user => user.StoreLocationId,
+                 (storeLocation, user) => new {
+                     StoreLocation = storeLocation,
+                     UserId = user.UserId
+                 }
+             )
+             .ToListAsync();
+                return Ok(new { success = true, data = storeLocationsWithUsers });
             }
             catch (Exception ex)
             {
@@ -760,25 +729,132 @@ namespace AutoSaleDN.Controllers
             }
         }
         [HttpPut("cars/{id}")]
-        public async Task<ActionResult> UpdateCar(int id, [FromBody] CarListing model)
+        public async Task<ActionResult> UpdateCar(int id, [FromBody] AddCarDto dto) // Sử dụng AddCarDto để nhận toàn bộ dữ liệu
         {
-            var car = await _context.CarListings.FirstOrDefaultAsync(c => c.ListingId == id);
-            if (car == null) return NotFound();
+            // Bắt đầu một Transaction để đảm bảo tính toàn vẹn dữ liệu
+            using var transaction = await _context.Database.BeginTransactionAsync();
+            try
+            {
+                // 1. Tìm bản ghi xe cần cập nhật
+                var car = await _context.CarListings
+                    .Include(c => c.Specifications)
+                    .Include(c => c.CarPricingDetails)
+                    .Include(c => c.StoreListings.Where(sl => sl.IsCurrent))
+                    .Include(c => c.CarListingFeatures)
+                    .Include(c => c.CarImages)
+                    .Include(c => c.CarVideos)
+                    .FirstOrDefaultAsync(c => c.ListingId == id);
 
-            car.ModelId = model.ModelId;
-            car.UserId = model.UserId;
-            car.Year = model.Year;
-            car.Mileage = model.Mileage;
-            car.Price = model.Price;
-            car.Condition = model.Condition;
-            car.Status = model.Status;
-            car.DateUpdated = DateTime.UtcNow;
-            car.Certified = model.Certified;
-            car.Vin = model.Vin;
-            car.Description = model.Description;
+                if (car == null)
+                {
+                    await transaction.RollbackAsync();
+                    return NotFound(new { success = false, message = "Car not found." });
+                }
+                car.ModelId = dto.ModelId;
+                car.UserId = dto.UserId;
+                car.Year = dto.Year;
+                car.Mileage = dto.Mileage;
+                car.Price = dto.Price;
+                car.Condition = dto.Condition;
+                car.Certified = dto.Certified;
+                car.Vin = dto.Vin;
+                car.Description = dto.Description;
+                car.DateUpdated = DateTime.UtcNow;
 
-            await _context.SaveChangesAsync();
-            return Ok(new { message = "Car updated successfully" });
+                var spec = car.Specifications.FirstOrDefault();
+                if (spec == null)
+                {
+                    spec = new CarSpecification { ListingId = car.ListingId };
+                    _context.CarSpecifications.Add(spec);
+                }
+                spec.ExteriorColor = dto.Color;
+                spec.InteriorColor = dto.InteriorColor;
+                spec.Transmission = dto.Transmission;
+                spec.Engine = dto.Engine;
+                spec.FuelType = dto.FuelType;
+                spec.CarType = dto.CarType;
+                spec.SeatingCapacity = dto.SeatingCapacity;
+
+                var pricing = car.CarPricingDetails.FirstOrDefault();
+                if (pricing == null)
+                {
+                    pricing = new CarPricingDetail { ListingId = car.ListingId };
+                    _context.CarPricingDetails.Add(pricing);
+                }
+                pricing.RegistrationFee = Math.Round(dto.RegistrationFee, 2);
+                pricing.TaxRate = Math.Round(dto.TaxRate, 2);
+
+                var currentStoreListing = car.StoreListings.FirstOrDefault();
+                if (currentStoreListing == null || currentStoreListing.StoreLocationId != dto.StoreLocationId)
+                {
+                    if (currentStoreListing != null)
+                    {
+                        currentStoreListing.IsCurrent = false;
+                        currentStoreListing.RemovedDate = DateTime.Now;
+                    }
+
+                    var newStoreListing = new StoreListing
+                    {
+                        ListingId = car.ListingId,
+                        StoreLocationId = dto.StoreLocationId,
+                        InitialQuantity = 1,
+                        IsCurrent = true,
+                        AddedDate = DateTime.Now,
+                        RemovedDate = null
+                    };
+                    _context.StoreListings.Add(newStoreListing);
+                }
+                _context.CarListingFeatures.RemoveRange(car.CarListingFeatures);
+                if (dto.FeatureIds != null && dto.FeatureIds.Any())
+                {
+                    var newFeatures = dto.FeatureIds.Select(fId => new CarListingFeature
+                    {
+                        ListingId = car.ListingId,
+                        FeatureId = fId
+                    }).ToList();
+                    _context.CarListingFeatures.AddRange(newFeatures);
+                }
+
+                _context.CarImages.RemoveRange(car.CarImages);
+                if (dto.ImageUrls != null && dto.ImageUrls.Any())
+                {
+                    var newImages = dto.ImageUrls.Select(url => new CarImage
+                    {
+                        ListingId = car.ListingId,
+                        Url = url
+                    }).ToList();
+                    _context.CarImages.AddRange(newImages);
+                }
+
+
+                _context.CarVideos.RemoveRange(car.CarVideos);
+                if (dto.VideoUrls != null && dto.VideoUrls.Any())
+                {
+                    var newVideos = dto.VideoUrls.Select(url => new CarVideo
+                    {
+                        ListingId = car.ListingId,
+                        Url = url,
+                        CreatedAt = DateTime.UtcNow
+                    }).ToList();
+                    _context.CarVideos.AddRange(newVideos);
+                }
+
+                await _context.SaveChangesAsync();
+                await transaction.CommitAsync();
+
+                return Ok(new { success = true, message = "Car updated successfully" });
+            }
+            catch (Exception ex)
+            {
+                await transaction.RollbackAsync();
+                return StatusCode(500, new
+                {
+                    success = false,
+                    message = "An error occurred while updating the car.",
+                    error = ex.Message,
+                    inner = ex.InnerException?.Message
+                });
+            }
         }
 
         [HttpDelete("cars/{id}")]
