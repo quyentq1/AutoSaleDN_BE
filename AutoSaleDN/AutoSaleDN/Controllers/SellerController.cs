@@ -3,6 +3,7 @@ using Microsoft.EntityFrameworkCore;
 using AutoSaleDN.Models;
 using Microsoft.AspNetCore.Authorization;
 using System.Security.Claims;
+using AutoSaleDN.DTO;
 
 namespace AutoSaleDN.Controllers
 {
@@ -333,6 +334,279 @@ namespace AutoSaleDN.Controllers
             return Ok(new { message = "Order status updated successfully." });
         }
 
+        private async Task<int?> GetSellerShowroomId()
+        {
+            var userIdClaim = User.FindFirst(ClaimTypes.NameIdentifier);
+            if (userIdClaim == null) return null;
+
+            if (!int.TryParse(userIdClaim.Value, out int userId))
+            {
+                return null;
+            }
+            var user = await _context.Users
+                .Where(u => u.UserId == userId)
+                .Select(u => u.StoreLocationId)
+                .FirstOrDefaultAsync();
+
+            return user;
+        }
+
+        [HttpGet("reports/revenue/daily")]
+        public async Task<IActionResult> GetDailyRevenueReport(DateTime? date = null)
+        {
+            var showroomId = await GetSellerShowroomId();
+            if (showroomId == null)
+            {
+                return Unauthorized("Seller has no assigned showroom.");
+            }
+
+            var targetDate = date?.Date ?? DateTime.UtcNow.Date;
+            var sales = await _context.Payments
+                .Where(p => p.PaymentStatus == "completed")
+                .Where(p => p.DateOfPayment.Date == targetDate)
+                .Where(p => p.PaymentForSale != null && p.PaymentForSale.StoreListing.StoreLocationId == showroomId)
+                .SumAsync(p => (decimal?)p.Amount) ?? 0;
+
+            return Ok(new { date = targetDate, totalRevenue = sales });
+        }
+
+        // Lấy doanh thu hàng tháng của showroom seller
+        [HttpGet("reports/revenue/monthly")]
+        public async Task<IActionResult> GetMonthlyRevenueReport(int? year = null, int? month = null)
+        {
+            var showroomId = await GetSellerShowroomId();
+            if (showroomId == null)
+            {
+                return Unauthorized("Seller has no assigned showroom.");
+            }
+
+            var y = year ?? DateTime.UtcNow.Year;
+            var m = month ?? DateTime.UtcNow.Month;
+            var sales = await _context.Payments
+                .Where(p => p.PaymentStatus == "completed")
+                .Where(p => p.DateOfPayment.Year == y && p.DateOfPayment.Month == m)
+                .Where(p => p.PaymentForSale != null && p.PaymentForSale.StoreListing.StoreLocationId == showroomId)
+                .SumAsync(p => (decimal?)p.Amount) ?? 0;
+
+            return Ok(new { year = y, month = m, totalRevenue = sales });
+        }
+
+        // Lấy doanh thu hàng năm của showroom seller
+        [HttpGet("reports/revenue/yearly")]
+        public async Task<IActionResult> GetYearlyRevenueReport(int? year = null)
+        {
+            var showroomId = await GetSellerShowroomId();
+            if (showroomId == null)
+            {
+                return Unauthorized("Seller has no assigned showroom.");
+            }
+
+            var y = year ?? DateTime.UtcNow.Year;
+            var sales = await _context.Payments
+                .Where(p => p.PaymentStatus == "completed")
+                .Where(p => p.DateOfPayment.Year == y)
+                .Where(p => p.PaymentForSale != null && p.PaymentForSale.StoreListing.StoreLocationId == showroomId)
+                .SumAsync(p => (decimal?)p.Amount) ?? 0;
+
+            return Ok(new { year = y, totalRevenue = sales });
+        }
+
+        // Lấy danh sách xe bán chạy nhất của showroom seller
+        [HttpGet("reports/top-selling-cars")]
+        public async Task<ActionResult<IEnumerable<TopSellingCarDto>>> GetTopSellingCars()
+        {
+            var showroomId = await GetSellerShowroomId();
+            if (showroomId == null)
+            {
+                return Unauthorized("Seller has no assigned showroom.");
+            }
+
+            var topCars = await _context.CarListings
+                .Include(cl => cl.Model)
+                .ThenInclude(m => m.CarManufacturer)
+                .Include(cl => cl.CarImages)
+                .Where(cl => cl.StoreListings.Any(sl => sl.StoreLocationId == showroomId))
+                .GroupBy(cl => new
+                {
+                    cl.ModelId,
+                    ModelName = cl.Model.Name,
+                    ManufacturerName = cl.Model.CarManufacturer.Name
+                })
+                .Select(g => new TopSellingCarDto
+                {
+                    ModelId = g.Key.ModelId,
+                    ModelName = g.Key.ModelName,
+                    ManufacturerName = g.Key.ManufacturerName,
+                    ImageUrl = g.FirstOrDefault().CarImages.FirstOrDefault().Url,
+                    // Cập nhật để tính TotalSold dựa trên các đơn hàng đã thanh toán hoàn tất
+                    TotalSold = _context.CarSales
+                        .Where(cs => cs.StoreListing.StoreLocationId == showroomId &&
+                                     cs.StoreListing.CarListing.ModelId == g.Key.ModelId)
+                        // Đếm các đơn hàng có ít nhất một khoản thanh toán full_payment hoặc remaining_payment đã hoàn tất
+                        .Count(cs => cs.FullPayment != null && cs.FullPayment.PaymentStatus == "completed" ||
+                                     cs.DepositPayment != null && cs.DepositPayment.PaymentStatus == "completed" && cs.RemainingBalance == 0),
+                    // Cập nhật để tính Revenue từ các khoản thanh toán đã hoàn tất
+                    Revenue = _context.Payments
+                        .Where(p => (p.PaymentPurpose == "full_payment" || p.PaymentPurpose == "remaining_payment") &&
+                                     p.PaymentStatus == "completed")
+                        .Where(p => p.PaymentForSale != null &&
+                                     p.PaymentForSale.StoreListing.StoreLocationId == showroomId &&
+                                     p.PaymentForSale.StoreListing.CarListing.ModelId == g.Key.ModelId)
+                        .Sum(p => (decimal?)p.Amount) ?? 0,
+                    AverageRating = _context.Reviews
+                        .Where(r => r.Listing.StoreListings.Any(sl => sl.StoreLocationId == showroomId) &&
+                                    r.Listing.ModelId == g.Key.ModelId)
+                        .Any() ? (int)_context.Reviews
+                        .Where(r => r.Listing.StoreListings.Any(sl => sl.StoreLocationId == showroomId) &&
+                                    r.Listing.ModelId == g.Key.ModelId)
+                        .Average(r => r.Rating) : 0,
+                    TotalReviews = _context.Reviews
+                        .Where(r => r.Listing.StoreListings.Any(sl => sl.StoreLocationId == showroomId) &&
+                                    r.Listing.ModelId == g.Key.ModelId)
+                        .Count()
+                })
+                .OrderByDescending(c => c.Revenue)
+                .Take(10)
+                .ToListAsync();
+
+            return Ok(topCars);
+        }
+
+        [HttpGet("cars-in-showroom")]
+        public async Task<ActionResult<ShowroomInventoryDto>> GetCarsInShowroom()
+        {
+            var showroomId = await GetSellerShowroomId();
+            if (showroomId == null)
+            {
+                return Unauthorized("Seller has no assigned showroom.");
+            }
+
+            var showroom = await _context.StoreLocations
+                .FirstOrDefaultAsync(sl => sl.StoreLocationId == showroomId);
+            if (showroom == null)
+            {
+                return NotFound("Showroom not found.");
+            }
+
+            // Lấy tất cả các listing đang 'IN_STOCK' của showroom
+            var listings = await _context.StoreListings
+                .Include(sl => sl.CarListing)
+                    .ThenInclude(cl => cl.Model)
+                        .ThenInclude(m => m.CarManufacturer)
+                .Include(sl => sl.CarListing)
+                    .ThenInclude(cl => cl.CarImages)
+                .Where(sl => sl.StoreLocationId == showroomId && sl.Status == "IN_STOCK")
+                .ToListAsync();
+
+            // Tính tổng số xe
+            var totalCars = listings.Sum(sl => sl.AvailableQuantity);
+
+            // Grouping và tạo danh sách Brands
+            var brands = listings
+                .GroupBy(sl => sl.CarListing.Model.CarManufacturer.Name)
+                .Select(g => new CarBrandStatsDto
+                {
+                    BrandName = g.Key,
+                    TotalCars = g.Sum(sl => sl.AvailableQuantity)
+                })
+                .ToList();
+
+            // Tạo danh sách Models, bao gồm hình ảnh
+            var models = listings
+                .Select(sl => new CarModelStatsDto
+                {
+                    ModelName = sl.CarListing.Model.Name,
+                    ManufacturerName = sl.CarListing.Model.CarManufacturer.Name,
+                    CurrentQuantity = sl.CurrentQuantity,
+                    AvailableQuantity = sl.AvailableQuantity,
+                })
+                .GroupBy(m => new { m.ModelName, m.ManufacturerName })
+                .Select(g => new CarModelStatsDto
+                {
+                    ModelName = g.Key.ModelName,
+                    ManufacturerName = g.Key.ManufacturerName,
+                    CurrentQuantity = g.Sum(m => m.CurrentQuantity),
+                    AvailableQuantity = g.Sum(m => m.AvailableQuantity),
+                })
+                .ToList();
+
+            // Khởi tạo và trả về một đối tượng ShowroomInventoryDto duy nhất
+            var inventory = new ShowroomDetailsDto
+            {
+                TotalCars = totalCars,
+                AvailableCars = totalCars,
+                Brands = brands,
+                Models = models
+            };
+
+            return Ok(inventory);
+        }
+
+        [HttpGet("reports/my-showroom-inventory")]
+    public async Task<ActionResult<ShowroomInventoryDto>> GetMyShowroomInventory()
+    {
+        var showroomId = await GetSellerShowroomId();
+        if (showroomId == null)
+        {
+            return Unauthorized("Seller has no assigned showroom.");
+        }
+
+        var showroom = await _context.StoreLocations
+            .FirstOrDefaultAsync(sl => sl.StoreLocationId == showroomId);
+        if (showroom == null)
+        {
+            return NotFound("Showroom not found.");
+        }
+
+        var listings = await _context.StoreListings
+            .Include(sl => sl.CarListing)
+                .ThenInclude(cl => cl.Model)
+                    .ThenInclude(m => m.CarManufacturer)
+            .Include(sl => sl.CarListing)
+                .ThenInclude(cl => cl.CarImages)
+            .Where(sl => sl.StoreLocationId == showroomId && sl.Status == "IN_STOCK")
+            .ToListAsync();
+
+        var totalCars = listings.Sum(sl => sl.AvailableQuantity);
+
+        var brands = listings
+            .GroupBy(sl => sl.CarListing.Model.CarManufacturer.Name)
+            .Select(g => new CarBrandStatsDto
+            {
+                BrandName = g.Key,
+                TotalCars = g.Sum(sl => sl.AvailableQuantity)
+            })
+            .ToList();
+
+        var models = listings
+            .Select(sl => new
+            {
+                ModelName = sl.CarListing.Model.Name,
+                ManufacturerName = sl.CarListing.Model.CarManufacturer.Name,
+                CurrentQuantity = sl.CurrentQuantity,
+                AvailableQuantity = sl.AvailableQuantity,
+                ImageUrl = sl.CarListing.CarImages.FirstOrDefault().Url
+            })
+            .GroupBy(m => new { m.ModelName, m.ManufacturerName })
+            .Select(g => new CarModelStatsDto
+            {
+                ModelName = g.Key.ModelName,
+                ManufacturerName = g.Key.ManufacturerName,
+                CurrentQuantity = g.Sum(m => m.CurrentQuantity),
+                AvailableQuantity = g.Sum(m => m.AvailableQuantity),
+            })
+            .ToList();
+
+        var inventory = new ShowroomDetailsDto
+        {
+            TotalCars = totalCars,
+            AvailableCars = totalCars,
+            Brands = brands,
+            Models = models
+        };
+
+        return Ok(inventory);
+    }
 
         // 7. Xem, trả lời đánh giá
         [HttpGet("reviews")]
