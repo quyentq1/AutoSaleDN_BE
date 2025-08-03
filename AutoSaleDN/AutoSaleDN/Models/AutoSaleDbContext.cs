@@ -35,7 +35,9 @@ namespace AutoSaleDN.Models
 
         public DbSet<CarVideo> CarVideos { get; set; }
 
-        public DbSet<StoreListing> StoreListings { get; set; } // Giữ lại DbSet này
+        public DbSet<SaleStatusHistory> SaleStatusHistory { get; set; }
+
+        public DbSet<StoreListing> StoreListings { get; set; }
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {

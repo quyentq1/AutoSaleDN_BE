@@ -936,7 +936,6 @@ namespace AutoSaleDN.Controllers
             }
         }
 
-        // Existing API: GetOrderDetail - Updated to include more details
         [HttpGet("orders/{id}")]
         public async Task<IActionResult> GetOrderDetail(int id)
         {
@@ -948,13 +947,18 @@ namespace AutoSaleDN.Controllers
 
                 orderQuery = orderQuery.Include(cs => cs.SaleStatus);
                 orderQuery = orderQuery.Include(cs => cs.StoreListing)
-                                       .ThenInclude(sl => sl.CarListing)
-                                           .ThenInclude(cl => cl.Model)
-                                               .ThenInclude(cm => cm.CarManufacturer);
+                                         .ThenInclude(sl => sl.CarListing)
+                                             .ThenInclude(cl => cl.Model)
+                                                 .ThenInclude(cm => cm.CarManufacturer);
                 orderQuery = orderQuery.Include(cs => cs.ShippingAddress);
                 orderQuery = orderQuery.Include(cs => cs.PickupStoreLocation);
                 orderQuery = orderQuery.Include(cs => cs.DepositPayment);
                 orderQuery = orderQuery.Include(cs => cs.FullPayment);
+
+                // DÒNG ĐƯỢC THÊM: Include SaleStatusHistory
+                orderQuery = orderQuery.Include(cs => cs.StatusHistory)
+                                         .ThenInclude(sh => sh.SaleStatus);
+
 
                 var order = await orderQuery.FirstOrDefaultAsync();
 
@@ -980,7 +984,7 @@ namespace AutoSaleDN.Controllers
                     order.FinalPrice,
                     order.DepositAmount,
                     order.RemainingBalance,
-                    Status = order.SaleStatus.StatusName,
+                    Status = order.SaleStatus?.StatusName,
                     order.DeliveryOption,
                     ShippingAddress = order.ShippingAddress != null ? new
                     {
@@ -1014,6 +1018,16 @@ namespace AutoSaleDN.Controllers
                         order.FullPayment.PaymentStatus,
                         order.FullPayment.DateOfPayment
                     } : null,
+                    // TRƯỜNG ĐƯỢC THÊM: Lấy và sắp xếp lịch sử trạng thái
+                    StatusHistory = order.StatusHistory
+                                        .OrderBy(sh => sh.Timestamp)
+                                        .Select(sh => new {
+                                            Id = sh.SaleStatusId,
+                                            Name = sh.SaleStatus.StatusName,
+                                            Date = sh.Timestamp,
+                                            Notes = sh.Notes
+                                        })
+                                        .ToList(),
                     order.OrderType,
                     order.CreatedAt,
                     order.UpdatedAt

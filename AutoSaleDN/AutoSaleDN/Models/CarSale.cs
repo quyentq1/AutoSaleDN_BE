@@ -40,5 +40,7 @@ namespace AutoSaleDN.Models
         public StoreLocation? PickupStoreLocation { get; set; }
         public Payment? DepositPayment { get; set; }
         public Payment? FullPayment { get; set; }
+
+        public ICollection<SaleStatusHistory> StatusHistory { get; set; } = new List<SaleStatusHistory>();
     }
 }
