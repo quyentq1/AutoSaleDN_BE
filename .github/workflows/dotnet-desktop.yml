@@ -17,13 +17,13 @@ jobs:
           dotnet-version: '7.0.x'  # Hoặc 6.0 nếu dùng .NET 6
 
       - name: Restore dependencies
-        run: dotnet restore
+        run: dotnet restore ./AutoSaleDN
 
       - name: Build project
-        run: dotnet build --configuration Release
+        run: dotnet build ./AutoSaleDN --configuration Release
 
       - name: Publish app
-        run: dotnet publish --configuration Release --output ./publish
+        run: dotnet publish ./AutoSaleDN --configuration Release --output ./publish
 
   deploy:
     runs-on: windows-latest
