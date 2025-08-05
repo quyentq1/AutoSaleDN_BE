@@ -32,5 +32,6 @@ jobs:
         server: ${{ secrets.VPS_HOST }}
         username: ${{ secrets.VPS_USERNAME }}
         password: ${{ secrets.VPS_PASSWORD }}
+        protocol: ftps 
         local-dir: ./publish/
         server-dir: ${{ secrets.BACKEND_DEPLOY_PATH }}
