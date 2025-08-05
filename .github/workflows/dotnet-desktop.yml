@@ -34,3 +34,4 @@ jobs:
         password: ${{ secrets.VPS_PASSWORD }}
         local-dir: ./publish/
         server-dir: ${{ secrets.BACKEND_DEPLOY_PATH }}
+        dangerous-clean-slate: true
