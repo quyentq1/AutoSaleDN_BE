@@ -1,0 +1,55 @@
+name: Deploy Backend (ASP.NET)
+
+on:
+  push:
+    branches: [ main ]
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v3
+
+      - name: Setup .NET SDK
+        uses: actions/setup-dotnet@v3
+        with:
+          dotnet-version: '7.0.x'  # Hoặc 6.0 nếu dùng .NET 6
+
+      - name: Restore dependencies
+        run: dotnet restore
+
+      - name: Build project
+        run: dotnet build --configuration Release
+
+      - name: Publish app
+        run: dotnet publish --configuration Release --output ./publish
+
+  deploy:
+    runs-on: windows-latest
+    needs: build
+    steps:
+      - name: Copy published files to VPS
+        shell: pwsh
+        run: |
+          $username = "${{ secrets.VPS_USERNAME }}"
+          $password = "${{ secrets.VPS_PASSWORD }}"
+          $remoteHost = "${{ secrets.VPS_HOST }}"
+          $deployPath = "${{ secrets.BACKEND_DEPLOY_PATH }}"
+
+          $secure = ConvertTo-SecureString $password -AsPlainText -Force
+          $cred = New-Object System.Management.Automation.PSCredential ($username, $secure)
+
+          $source = "./publish/*"
+          $destination = "\\$remoteHost\$deployPath"
+
+          Write-Host "🚚 Deploying ASP.NET backend to '$destination'..."
+          Copy-Item -Path $source -Destination $destination -Recurse -Force -Credential $cred
+
+          # Restart IIS site nếu đang host bằng IIS
+          $iisSiteName = "AutoSaleBackend"
+          Write-Host "🔁 Restarting IIS site '$iisSiteName'..."
+          Invoke-Command -ComputerName $remoteHost -Credential $cred -ScriptBlock {
+            Import-Module WebAdministration
+            Restart-WebItem "IIS:\Sites\$using:iisSiteName"
+          }
