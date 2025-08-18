@@ -164,33 +164,37 @@ public class UserController : ControllerBase
     }
 
     [HttpGet("cars")]
-    public async Task<IActionResult> GetCars(
-        [FromQuery] string? keyword = null,
-        [FromQuery] string? paymentType = null,
-        [FromQuery] decimal? priceFrom = null,
-        [FromQuery] decimal? priceTo = null,
-        [FromQuery] bool? vatDeduction = null,
-        [FromQuery] bool? discountedCars = null,
-        [FromQuery] bool? premiumPartners = null,
-        [FromQuery] int? registrationFrom = null,
-        [FromQuery] int? registrationTo = null,
-        [FromQuery] int? mileageFrom = null,
-        [FromQuery] int? mileageTo = null,
-        [FromQuery] string? transmission = null,
-        [FromQuery] string? fuelType = null,
-        [FromQuery] string? powerUnit = null,
-        [FromQuery] double? powerFrom = null,
-        [FromQuery] double? powerTo = null,
-        [FromQuery] string? vehicleType = null,
-        [FromQuery] bool? driveType4x4 = null,
-        [FromQuery] string? color = null,
-        [FromQuery] List<string>? features = null,
-        [FromQuery] string? sortBy = null,
-        [FromQuery] int page = 1,
-        [FromQuery] int perPage = 5
-    )
+public async Task<IActionResult> GetCars(
+    [FromQuery] string? keyword = null,
+    [FromQuery] string? paymentType = null,
+    [FromQuery] decimal? priceFrom = null,
+    [FromQuery] decimal? priceTo = null,
+    [FromQuery] bool? vatDeduction = null,
+    [FromQuery] bool? discountedCars = null,
+    [FromQuery] bool? premiumPartners = null,
+    [FromQuery] int? registrationFrom = null,
+    [FromQuery] int? registrationTo = null,
+    [FromQuery] int? mileageFrom = null,
+    [FromQuery] int? mileageTo = null,
+    [FromQuery] string? transmission = null,
+    [FromQuery] string? fuelType = null,
+    [FromQuery] string? powerUnit = null,
+    [FromQuery] double? powerFrom = null,
+    [FromQuery] double? powerTo = null,
+    [FromQuery] string? vehicleType = null,
+    [FromQuery] bool? driveType4x4 = null,
+    [FromQuery] string? color = null,
+    [FromQuery] List<string>? features = null,
+    [FromQuery] string? sortBy = null,
+    [FromQuery] int page = 1,
+    [FromQuery] int perPage = 5 
+)
+{
+    try
     {
+        // Tối ưu query với AsSplitQuery để tránh cartesian explosion
         var query = _context.CarListings
+            .AsSplitQuery()
             .Include(c => c.Model)
                 .ThenInclude(m => m.CarManufacturer)
             .Include(c => c.Specifications)
@@ -208,100 +212,154 @@ public class UserController : ControllerBase
                 .ThenInclude(cs => cs.StoreLocation)
             .AsQueryable();
 
-        // Apply Keyword Filter
+        // Apply filters with null checks
         if (!string.IsNullOrEmpty(keyword))
         {
             query = query.Where(c =>
-                c.Model.Name.Contains(keyword) ||
-                c.Model.CarManufacturer.Name.Contains(keyword) ||
-                c.Description.Contains(keyword) ||
+                (c.Model != null && c.Model.Name.Contains(keyword)) ||
+                (c.Model != null && c.Model.CarManufacturer != null && c.Model.CarManufacturer.Name.Contains(keyword)) ||
+                (c.Description != null && c.Description.Contains(keyword)) ||
                 c.Year.ToString().Contains(keyword)
             );
         }
+
         if (priceFrom.HasValue)
         {
             query = query.Where(c => c.Price >= priceFrom.Value);
         }
+
         if (priceTo.HasValue)
         {
             query = query.Where(c => c.Price <= priceTo.Value);
         }
+
         if (vatDeduction.HasValue && vatDeduction.Value)
         {
-            query = query.Where(c => c.CarPricingDetails.Any());
+            query = query.Where(c => c.CarPricingDetails != null && c.CarPricingDetails.Any());
         }
+
+        // TODO: Implement discountedCars filter
         if (discountedCars.HasValue && discountedCars.Value)
         {
+            // Add your discount logic here
         }
+
+        // TODO: Implement premiumPartners filter  
         if (premiumPartners.HasValue && premiumPartners.Value)
         {
+            // Add your premium partners logic here
         }
+
         if (registrationFrom.HasValue)
         {
             query = query.Where(c => c.Year >= registrationFrom.Value);
         }
+
         if (registrationTo.HasValue)
         {
             query = query.Where(c => c.Year <= registrationTo.Value);
         }
+
         if (mileageFrom.HasValue)
         {
             query = query.Where(c => c.Mileage >= mileageFrom.Value);
         }
+
         if (mileageTo.HasValue)
         {
             query = query.Where(c => c.Mileage <= mileageTo.Value);
         }
+
         if (!string.IsNullOrEmpty(transmission))
         {
-            query = query.Where(c => c.Specifications.Any(s => s.Transmission == transmission));
+            query = query.Where(c => c.Specifications != null && 
+                c.Specifications.Any(s => s.Transmission == transmission));
         }
+
         if (!string.IsNullOrEmpty(fuelType))
         {
-            query = query.Where(c => c.Specifications.Any(s => s.FuelType == fuelType));
+            query = query.Where(c => c.Specifications != null && 
+                c.Specifications.Any(s => s.FuelType == fuelType));
         }
+
         if (!string.IsNullOrEmpty(vehicleType))
         {
-            query = query.Where(c => c.Specifications.Any(s => s.CarType == vehicleType));
+            query = query.Where(c => c.Specifications != null && 
+                c.Specifications.Any(s => s.CarType == vehicleType));
         }
+
         if (driveType4x4.HasValue && driveType4x4.Value)
         {
-            query = query.Where(c => c.CarListingFeatures.Any(clf => clf.Feature.Name == "4x4"));
+            query = query.Where(c => c.CarListingFeatures != null && 
+                c.CarListingFeatures.Any(clf => clf.Feature != null && clf.Feature.Name == "4x4"));
         }
+
+        // Fix color filter logic
         if (!string.IsNullOrEmpty(color))
         {
-            query = query.Where(c => c.Specifications.Any(s => s.ExteriorColor != null && s.InteriorColor != null));
+            query = query.Where(c => c.Specifications != null && 
+                c.Specifications.Any(s => 
+                    (s.ExteriorColor != null && s.ExteriorColor.ToLower().Contains(color.ToLower())) ||
+                    (s.InteriorColor != null && s.InteriorColor.ToLower().Contains(color.ToLower()))
+                ));
         }
+
         if (features != null && features.Any())
         {
             foreach (var featureName in features)
             {
-                query = query.Where(c => c.CarListingFeatures.Any(clf => clf.Feature.Name == featureName));
+                var currentFeature = featureName; // Capture for closure
+                query = query.Where(c => c.CarListingFeatures != null && 
+                    c.CarListingFeatures.Any(clf => clf.Feature != null && clf.Feature.Name == currentFeature));
             }
         }
 
+        // Simplified availability filter với null checks
         query = query.Where(c =>
+            c.StoreListings == null || 
+            !c.StoreListings.Any() ||
+            !c.StoreListings
+                .Where(sl => sl.CarSales != null)
+                .SelectMany(sl => sl.CarSales)
+                .Where(cs => cs.SaleStatus != null)
+                .Any(cs => cs.SaleStatus.StatusName == "Payment Complete")
+        );
 
-        !c.StoreListings.Any() ||
-        c.StoreListings
-            .SelectMany(sl => sl.CarSales)
-            .OrderByDescending(s => s.CreatedAt)
-            .FirstOrDefault() == null ||
-        c.StoreListings
-            .SelectMany(sl => sl.CarSales)
-            .OrderByDescending(s => s.CreatedAt)
-            .FirstOrDefault()
-            .SaleStatus.StatusName != "Payment Complete"
-            );
-        query = query.OrderByDescending(c => c.DatePosted);
+        // Apply sorting
+        switch (sortBy?.ToLower())
+        {
+            case "price_asc":
+                query = query.OrderBy(c => c.Price);
+                break;
+            case "price_desc":
+                query = query.OrderByDescending(c => c.Price);
+                break;
+            case "year_asc":
+                query = query.OrderBy(c => c.Year);
+                break;
+            case "year_desc":
+                query = query.OrderByDescending(c => c.Year);
+                break;
+            case "mileage_asc":
+                query = query.OrderBy(c => c.Mileage);
+                break;
+            case "mileage_desc":
+                query = query.OrderByDescending(c => c.Mileage);
+                break;
+            default:
+                query = query.OrderByDescending(c => c.DatePosted);
+                break;
+        }
 
+        // Get total count trước khi apply pagination
         var totalResults = await query.CountAsync();
 
+        // Apply pagination
         var carsToSkip = (page - 1) * perPage;
-        query = query.Skip(carsToSkip).Take(perPage);
+        var pagedQuery = query.Skip(carsToSkip).Take(perPage);
 
-
-        var cars = await query
+        // Execute query với error handling
+        var cars = await pagedQuery
             .Select(c => new
             {
                 c.ListingId,
@@ -313,16 +371,16 @@ public class UserController : ControllerBase
                 c.Condition,
                 c.DatePosted,
                 c.Description,
-                Model = new
+                Model = c.Model != null ? new
                 {
                     c.Model.ModelId,
                     c.Model.Name,
-                    Manufacturer = new
+                    Manufacturer = c.Model.CarManufacturer != null ? new
                     {
                         c.Model.CarManufacturer.ManufacturerId,
                         c.Model.CarManufacturer.Name
-                    }
-                },
+                    } : null
+                } : null,
                 Specifications = c.Specifications != null ? c.Specifications.Select(s => new
                 {
                     s.SpecificationId,
@@ -337,61 +395,84 @@ public class UserController : ControllerBase
                     i.ImageId,
                     i.Url,
                     i.Filename
-                }) : null,
-                Features = c.CarListingFeatures != null ? c.CarListingFeatures.Select(f => new
-                {
-                    f.Feature.FeatureId,
-                    f.Feature.Name
-                }) : null,
+                }).ToList() : null,
+                Features = c.CarListingFeatures != null ? c.CarListingFeatures
+                    .Where(clf => clf.Feature != null)
+                    .Select(f => new
+                    {
+                        f.Feature.FeatureId,
+                        f.Feature.Name
+                    }).ToList() : null,
                 ServiceHistory = c.CarServiceHistories != null ? c.CarServiceHistories.Select(sh => new
                 {
                     sh.RecentServicing,
                     sh.NoAccidentHistory,
                     sh.Modifications
-                }) : null,
-                Pricing = c.CarPricingDetails != null ? c.CarPricingDetails.Select(shh => new
+                }).ToList() : null,
+                Pricing = c.CarPricingDetails != null ? c.CarPricingDetails.Select(p => new
                 {
-                    shh.TaxRate,
-                    shh.RegistrationFee
+                    p.TaxRate,
+                    p.RegistrationFee
                 }).ToList() : null,
                 SalesHistory = c.CarSales != null ? c.CarSales.Select(s => new
                 {
                     s.SaleId,
                     s.FinalPrice,
                     s.SaleDate,
-                    s.SaleStatus.StatusName
-                }) : null,
-                Reviews = c.Reviews != null ? c.Reviews.Select(r => new
-                {
-                    r.ReviewId,
-                    r.UserId,
-                    r.Rating,
-                    r.User.FullName,
-                    r.CreatedAt
-                }) : null,
-                Showrooms = c.StoreListings != null ? c.StoreListings.Select(cs => new
-                {
-                    cs.StoreLocation.StoreLocationId,
-                    cs.StoreLocation.Name,
-                    cs.StoreLocation.Address,
-                }) : null,
-                currentSaleStatus = c.StoreListings
-                .SelectMany(sl => sl.CarSales)
-                .OrderByDescending(s => s.CreatedAt)
-                .Select(s => s.SaleStatus.StatusName)
-                .FirstOrDefault() ?? "Available"
+                    SaleStatus = s.SaleStatus != null ? s.SaleStatus.StatusName : null
+                }).ToList() : null,
+                Reviews = c.Reviews != null ? c.Reviews
+                    .Where(r => r.User != null)
+                    .Select(r => new
+                    {
+                        r.ReviewId,
+                        r.UserId,
+                        r.Rating,
+                        r.User.FullName,
+                        r.CreatedAt
+                    }).ToList() : null,
+                Showrooms = c.StoreListings != null ? c.StoreListings
+                    .Where(sl => sl.StoreLocation != null)
+                    .Select(cs => new
+                    {
+                        cs.StoreLocation.StoreLocationId,
+                        cs.StoreLocation.Name,
+                        cs.StoreLocation.Address,
+                    }).ToList() : null,
+                CurrentSaleStatus = c.StoreListings != null ? 
+                    c.StoreListings
+                        .Where(sl => sl.CarSales != null)
+                        .SelectMany(sl => sl.CarSales)
+                        .Where(cs => cs.SaleStatus != null)
+                        .OrderByDescending(s => s.CreatedAt)
+                        .Select(s => s.SaleStatus.StatusName)
+                        .FirstOrDefault() ?? "Available" : "Available"
             })
             .ToListAsync();
-        var totalPages = (int)Math.Ceiling((double)totalResults / perPage);
-        if (totalPages == 0 && totalResults > 0) totalPages = 1;
+
+        var totalPages = totalResults > 0 ? (int)Math.Ceiling((double)totalResults / perPage) : 0;
 
         return Ok(new
         {
             cars = cars,
             totalResults = totalResults,
-            totalPages = totalPages
+            totalPages = totalPages,
+            currentPage = page,
+            perPage = perPage
         });
     }
+    catch (Exception ex)
+    {
+        // Log exception details
+        // _logger.LogError(ex, "Error occurred while fetching cars");
+        
+        return StatusCode(500, new
+        {
+            message = "An error occurred while processing your request",
+            error = ex.Message // Remove this in production
+        });
+    }
+}
 
     [HttpGet("cars/{id}")]
     public async Task<IActionResult> GetCarDetail(int id)
