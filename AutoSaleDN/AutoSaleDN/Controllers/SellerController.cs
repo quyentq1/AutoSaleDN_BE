@@ -4,6 +4,7 @@ using AutoSaleDN.Models;
 using Microsoft.AspNetCore.Authorization;
 using System.Security.Claims;
 using AutoSaleDN.DTO;
+using System.ComponentModel.DataAnnotations;
 
 namespace AutoSaleDN.Controllers
 {
@@ -319,17 +320,17 @@ namespace AutoSaleDN.Controllers
             order.Notes = dto.Notes;
             order.UpdatedAt = DateTime.UtcNow;
 
-           var statusHistoryEntry = new SaleStatusHistory
-           {
-               SaleId = order.SaleId,
-               SaleStatusId = dto.SaleStatusId,
-               UserId = userId,
-               Notes = dto.Notes,
-               Timestamp = DateTime.UtcNow
-           };
+            var statusHistoryEntry = new SaleStatusHistory
+            {
+                SaleId = order.SaleId,
+                SaleStatusId = dto.SaleStatusId,
+                UserId = userId,
+                Notes = dto.Notes,
+                Timestamp = DateTime.UtcNow
+            };
             _context.SaleStatusHistory.Add(statusHistoryEntry);
 
-           await _context.SaveChangesAsync();
+            await _context.SaveChangesAsync();
 
             return Ok(new { message = "Order status updated successfully." });
         }
@@ -543,70 +544,70 @@ namespace AutoSaleDN.Controllers
         }
 
         [HttpGet("reports/my-showroom-inventory")]
-    public async Task<ActionResult<ShowroomInventoryDto>> GetMyShowroomInventory()
-    {
-        var showroomId = await GetSellerShowroomId();
-        if (showroomId == null)
+        public async Task<ActionResult<ShowroomInventoryDto>> GetMyShowroomInventory()
         {
-            return Unauthorized("Seller has no assigned showroom.");
+            var showroomId = await GetSellerShowroomId();
+            if (showroomId == null)
+            {
+                return Unauthorized("Seller has no assigned showroom.");
+            }
+
+            var showroom = await _context.StoreLocations
+                .FirstOrDefaultAsync(sl => sl.StoreLocationId == showroomId);
+            if (showroom == null)
+            {
+                return NotFound("Showroom not found.");
+            }
+
+            var listings = await _context.StoreListings
+                .Include(sl => sl.CarListing)
+                    .ThenInclude(cl => cl.Model)
+                        .ThenInclude(m => m.CarManufacturer)
+                .Include(sl => sl.CarListing)
+                    .ThenInclude(cl => cl.CarImages)
+                .Where(sl => sl.StoreLocationId == showroomId && sl.Status == "IN_STOCK")
+                .ToListAsync();
+
+            var totalCars = listings.Sum(sl => sl.AvailableQuantity);
+
+            var brands = listings
+                .GroupBy(sl => sl.CarListing.Model.CarManufacturer.Name)
+                .Select(g => new CarBrandStatsDto
+                {
+                    BrandName = g.Key,
+                    TotalCars = g.Sum(sl => sl.AvailableQuantity)
+                })
+                .ToList();
+
+            var models = listings
+                .Select(sl => new
+                {
+                    ModelName = sl.CarListing.Model.Name,
+                    ManufacturerName = sl.CarListing.Model.CarManufacturer.Name,
+                    CurrentQuantity = sl.CurrentQuantity,
+                    AvailableQuantity = sl.AvailableQuantity,
+                    ImageUrl = sl.CarListing.CarImages.FirstOrDefault().Url
+                })
+                .GroupBy(m => new { m.ModelName, m.ManufacturerName })
+                .Select(g => new CarModelStatsDto
+                {
+                    ModelName = g.Key.ModelName,
+                    ManufacturerName = g.Key.ManufacturerName,
+                    CurrentQuantity = g.Sum(m => m.CurrentQuantity),
+                    AvailableQuantity = g.Sum(m => m.AvailableQuantity),
+                })
+                .ToList();
+
+            var inventory = new ShowroomDetailsDto
+            {
+                TotalCars = totalCars,
+                AvailableCars = totalCars,
+                Brands = brands,
+                Models = models
+            };
+
+            return Ok(inventory);
         }
-
-        var showroom = await _context.StoreLocations
-            .FirstOrDefaultAsync(sl => sl.StoreLocationId == showroomId);
-        if (showroom == null)
-        {
-            return NotFound("Showroom not found.");
-        }
-
-        var listings = await _context.StoreListings
-            .Include(sl => sl.CarListing)
-                .ThenInclude(cl => cl.Model)
-                    .ThenInclude(m => m.CarManufacturer)
-            .Include(sl => sl.CarListing)
-                .ThenInclude(cl => cl.CarImages)
-            .Where(sl => sl.StoreLocationId == showroomId && sl.Status == "IN_STOCK")
-            .ToListAsync();
-
-        var totalCars = listings.Sum(sl => sl.AvailableQuantity);
-
-        var brands = listings
-            .GroupBy(sl => sl.CarListing.Model.CarManufacturer.Name)
-            .Select(g => new CarBrandStatsDto
-            {
-                BrandName = g.Key,
-                TotalCars = g.Sum(sl => sl.AvailableQuantity)
-            })
-            .ToList();
-
-        var models = listings
-            .Select(sl => new
-            {
-                ModelName = sl.CarListing.Model.Name,
-                ManufacturerName = sl.CarListing.Model.CarManufacturer.Name,
-                CurrentQuantity = sl.CurrentQuantity,
-                AvailableQuantity = sl.AvailableQuantity,
-                ImageUrl = sl.CarListing.CarImages.FirstOrDefault().Url
-            })
-            .GroupBy(m => new { m.ModelName, m.ManufacturerName })
-            .Select(g => new CarModelStatsDto
-            {
-                ModelName = g.Key.ModelName,
-                ManufacturerName = g.Key.ManufacturerName,
-                CurrentQuantity = g.Sum(m => m.CurrentQuantity),
-                AvailableQuantity = g.Sum(m => m.AvailableQuantity),
-            })
-            .ToList();
-
-        var inventory = new ShowroomDetailsDto
-        {
-            TotalCars = totalCars,
-            AvailableCars = totalCars,
-            Brands = brands,
-            Models = models
-        };
-
-        return Ok(inventory);
-    }
 
         // 7. Xem, trả lời đánh giá
         [HttpGet("reviews")]
@@ -630,29 +631,909 @@ namespace AutoSaleDN.Controllers
             await _context.SaveChangesAsync();
             return Ok(new { message = "Reply added" });
         }
+        [HttpGet("posts")]
 
-        // 8. Chat (giả lập)
-        [HttpGet("chats")]
-        public IActionResult GetChats() => Ok(new { message = "Chat list (implement as needed)" });
+        public async Task<IActionResult> GetBlogPosts(
 
-        [HttpGet("chats/{id}")]
-        public IActionResult GetChatDetail(int id) => Ok(new { message = "Chat detail (implement as needed)" });
+  [FromQuery] int page = 1,
 
-        [HttpPost("chats/{id}/reply")]
-        public IActionResult ReplyChat(int id, [FromBody] string message) => Ok(new { message = "Reply sent (implement as needed)" });
+  [FromQuery] int pageSize = 10,
 
-        // 9. Xem danh sách khuyến mãi
-        [HttpGet("promotions")]
-        public async Task<IActionResult> GetPromotions()
+  [FromQuery] string search = "",
+
+  [FromQuery] int? categoryId = null,
+
+  [FromQuery] bool? isPublished = null)
+
         {
-            var promotions = await _context.Promotions.ToListAsync();
-            return Ok(promotions);
+
+            try
+
+            {
+
+                var sellerId = GetUserId();
+
+                var query = _context.BlogPosts
+
+                  .Include(p => p.Category)
+
+                  .Include(p => p.BlogPostTags)
+
+                    .ThenInclude(pt => pt.Tag)
+
+                  .Where(p => p.UserId == sellerId)
+
+                  .AsQueryable();
+
+
+
+                if (!string.IsNullOrEmpty(search))
+
+                {
+
+                    query = query.Where(p =>
+
+                      p.Title.Contains(search) ||
+
+                      p.Slug.Contains(search) ||
+
+                      p.Content.Contains(search));
+
+                }
+
+
+
+                if (categoryId.HasValue)
+
+                {
+
+                    query = query.Where(p => p.CategoryId == categoryId);
+
+                }
+
+
+
+                if (isPublished.HasValue)
+
+                {
+
+                    query = query.Where(p => p.IsPublished == isPublished);
+
+                }
+
+
+
+                var totalCount = await query.CountAsync();
+
+
+
+                var posts = await query
+
+                  .OrderByDescending(p => p.CreatedAt)
+
+                  .Skip((page - 1) * pageSize)
+
+                  .Take(pageSize)
+
+                  .Select(p => new
+
+                  {
+
+                      p.PostId,
+
+                      p.Title,
+
+                      p.Slug,
+
+                      p.Content,
+
+                      p.Excerpt,
+
+                      p.FeaturedImage,
+
+                      p.IsPublished,
+
+                      p.PublishedDate,
+
+                      p.ViewCount,
+
+                      p.CreatedAt,
+
+                      p.UpdatedAt,
+
+                      Category = new { p.Category.CategoryId, p.Category.Name },
+
+                      Tags = p.BlogPostTags.Select(pt => new { pt.Tag.TagId, pt.Tag.Name })
+
+                  })
+
+                  .ToListAsync();
+
+
+
+                return Ok(new
+
+                {
+
+                    Items = posts,
+
+                    TotalCount = totalCount,
+
+                    PageNumber = page,
+
+                    PageSize = pageSize,
+
+                    TotalPages = (int)Math.Ceiling(totalCount / (double)pageSize)
+
+                });
+
+            }
+
+            catch (Exception ex)
+
+            {
+
+                return StatusCode(500, new { message = "An error occurred while retrieving blog posts", error = ex.Message });
+
+            }
+
         }
+
+
+
+        [HttpGet("posts/{id}")]
+
+        public async Task<IActionResult> GetBlogPost(int id)
+
+        {
+
+            try
+
+            {
+
+                var sellerId = GetUserId();
+
+                var post = await _context.BlogPosts
+
+                  .Include(p => p.Category)
+
+                  .Include(p => p.BlogPostTags)
+
+                    .ThenInclude(pt => pt.Tag)
+
+                  .Where(p => p.PostId == id && p.UserId == sellerId)
+
+                  .Select(p => new
+
+                  {
+
+                      p.PostId,
+
+                      p.Title,
+
+                      p.Slug,
+
+                      p.Content,
+
+                      p.Excerpt,
+
+                      p.FeaturedImage,
+
+                      p.IsPublished,
+
+                      p.PublishedDate,
+
+                      p.ViewCount,
+
+                      p.CreatedAt,
+
+                      p.UpdatedAt,
+
+                      CategoryId = p.Category.CategoryId,
+
+                      TagIds = p.BlogPostTags.Select(pt => pt.Tag.TagId).ToList()
+
+                  })
+
+                  .FirstOrDefaultAsync();
+
+
+
+                if (post == null)
+
+                {
+
+                    return NotFound(new { message = "Blog post not found" });
+
+                }
+
+
+
+                return Ok(post);
+
+            }
+
+            catch (Exception ex)
+
+            {
+
+                return StatusCode(500, new { message = "An error occurred while retrieving the blog post", error = ex.Message });
+
+            }
+
+        }
+
+
+
+        [HttpPost("posts")]
+
+        public async Task<IActionResult> CreateBlogPost([FromBody] BlogPostCreateModel model)
+
+        {
+
+            try
+
+            {
+
+                var sellerId = GetUserId();
+
+
+
+                // Validate category exists
+
+                var category = await _context.BlogCategories
+
+          .FirstOrDefaultAsync(c => c.CategoryId == model.CategoryId);
+
+
+
+                if (category == null)
+
+                {
+
+                    return BadRequest(new { message = "Invalid category ID" });
+
+                }
+
+
+
+                // Create new post
+
+                var post = new BlogPost
+
+                {
+
+                    Title = model.Title,
+
+                    Slug = model.Slug,
+
+                    Content = model.Content,
+
+                    Excerpt = model.Excerpt,
+
+                    FeaturedImage = model.FeaturedImage,
+
+                    IsPublished = model.IsPublished,
+
+                    PublishedDate = model.IsPublished ? DateTime.UtcNow : null,
+
+                    CategoryId = model.CategoryId,
+
+                    UserId = sellerId,
+
+                    CreatedAt = DateTime.UtcNow,
+
+                    BlogPostTags = new List<BlogPostTag>()
+
+                };
+
+
+
+                // Add tags if provided
+
+                if (model.TagIds != null && model.TagIds.Any())
+
+                {
+
+                    var existingTags = await _context.BlogTags
+
+                      .Where(t => model.TagIds.Contains(t.TagId))
+
+                      .ToListAsync();
+
+
+
+                    foreach (var tagId in model.TagIds)
+
+                    {
+
+                        if (existingTags.All(t => t.TagId != tagId))
+
+                        {
+
+                            return BadRequest(new { message = $"Invalid tag ID: {tagId}" });
+
+                        }
+
+
+
+                        post.BlogPostTags.Add(new BlogPostTag
+
+                        {
+
+                            Post = post,
+
+                            TagId = tagId
+
+                        });
+
+                    }
+
+                }
+
+
+
+                _context.BlogPosts.Add(post);
+
+                await _context.SaveChangesAsync();
+
+
+
+                // Return the created post with related data
+
+                var createdPost = await _context.BlogPosts
+
+          .Include(p => p.Category)
+
+          .Include(p => p.BlogPostTags)
+
+            .ThenInclude(pt => pt.Tag)
+
+          .Where(p => p.PostId == post.PostId)
+
+          .Select(p => new
+
+          {
+
+              p.PostId,
+
+              p.Title,
+
+              p.Slug,
+
+              p.Content,
+
+              p.Excerpt,
+
+              p.FeaturedImage,
+
+              p.IsPublished,
+
+              p.PublishedDate,
+
+              p.ViewCount,
+
+              p.CreatedAt,
+
+              p.UpdatedAt,
+
+              Category = new { p.Category.CategoryId, p.Category.Name },
+
+              Tags = p.BlogPostTags.Select(pt => new { pt.Tag.TagId, pt.Tag.Name })
+
+          })
+
+          .FirstOrDefaultAsync();
+
+
+
+                return CreatedAtAction(nameof(GetBlogPost), new { id = post.PostId }, createdPost);
+
+            }
+
+            catch (Exception ex)
+
+            {
+
+                return StatusCode(500, new { message = "An error occurred while creating the blog post", error = ex.Message });
+
+            }
+
+        }
+
+
+
+
+
+        // PUT: api/seller/posts/5
+
+        [HttpPut("posts/{id}")]
+
+        public async Task<IActionResult> UpdateBlogPost(int id, [FromBody] BlogPostUpdateModel model)
+
+        {
+
+            try
+
+            {
+
+                var sellerId = GetUserId();
+
+
+
+                var post = await _context.BlogPosts
+
+                  .Include(p => p.BlogPostTags)
+
+                  .FirstOrDefaultAsync(p => p.PostId == id && p.UserId == sellerId);
+
+
+
+                if (post == null)
+
+                {
+
+                    return NotFound(new { message = "Blog post not found" });
+
+                }
+
+
+
+                // Update post properties
+
+                if (model.Title != null) post.Title = model.Title;
+
+                if (model.Slug != null) post.Slug = model.Slug;
+
+                if (model.Content != null) post.Content = model.Content;
+
+                if (model.Excerpt != null) post.Excerpt = model.Excerpt;
+
+                if (model.FeaturedImage != null) post.FeaturedImage = model.FeaturedImage;
+
+
+
+                post.UpdatedAt = DateTime.UtcNow;
+
+
+
+                // Update category if provided
+
+                if (model.CategoryId.HasValue)
+
+                {
+
+                    var category = await _context.BlogCategories
+
+                      .FirstOrDefaultAsync(c => c.CategoryId == model.CategoryId);
+
+
+
+                    if (category == null)
+
+                    {
+
+                        return BadRequest(new { message = "Invalid category ID" });
+
+                    }
+
+
+
+                    post.CategoryId = category.CategoryId;
+
+                }
+
+
+
+                // Update tags if provided
+
+                if (model.TagIds != null)
+
+                {
+
+                    // Remove existing tags
+
+                    _context.BlogPostTags.RemoveRange(post.BlogPostTags);
+
+
+
+                    // Add new tags
+
+                    if (model.TagIds.Any())
+
+                    {
+
+                        var tags = await _context.BlogTags
+
+                          .Where(t => model.TagIds.Contains(t.TagId))
+
+                          .ToListAsync();
+
+
+
+                        post.BlogPostTags = tags.Select(tag => new BlogPostTag
+
+                        {
+
+                            PostId = post.PostId,
+
+                            TagId = tag.TagId
+
+                        }).ToList();
+
+                    }
+
+                }
+
+
+
+                // Update published status if provided
+
+                if (model.IsPublished.HasValue)
+
+                {
+
+                    post.IsPublished = model.IsPublished.Value;
+
+                    if (model.IsPublished.Value && !post.PublishedDate.HasValue)
+
+                    {
+
+                        post.PublishedDate = DateTime.UtcNow;
+
+                    }
+
+                }
+
+
+
+                await _context.SaveChangesAsync();
+
+
+
+                // Return the updated post
+
+                var updatedPost = await _context.BlogPosts
+
+          .Include(p => p.Category)
+
+          .Include(p => p.BlogPostTags)
+
+            .ThenInclude(pt => pt.Tag)
+
+          .Where(p => p.PostId == id)
+
+          .Select(p => new
+
+          {
+
+              p.PostId,
+
+              p.Title,
+
+              p.Slug,
+
+              p.Content,
+
+              p.Excerpt,
+
+              p.FeaturedImage,
+
+              p.IsPublished,
+
+              p.PublishedDate,
+
+              p.ViewCount,
+
+              p.CreatedAt,
+
+              p.UpdatedAt,
+
+              Category = new { p.Category.CategoryId, p.Category.Name },
+
+              Tags = p.BlogPostTags.Select(pt => new { pt.Tag.TagId, pt.Tag.Name })
+
+          })
+
+          .FirstOrDefaultAsync();
+
+
+
+                return Ok(updatedPost);
+
+            }
+
+            catch (Exception ex)
+
+            {
+
+                return StatusCode(500, new { message = "An error occurred while updating the blog post", error = ex.Message });
+
+            }
+
+        }
+
+
+
+        // DELETE: api/seller/posts/5
+
+        [HttpDelete("posts/{id}")]
+
+        public async Task<IActionResult> DeleteBlogPost(int id)
+
+        {
+
+            try
+
+            {
+
+                var sellerId = GetUserId();
+
+
+
+                var post = await _context.BlogPosts
+
+                  .FirstOrDefaultAsync(p => p.PostId == id && p.UserId == sellerId);
+
+
+
+                if (post == null)
+
+                {
+
+                    return NotFound(new { message = "Blog post not found" });
+
+                }
+
+
+
+                _context.BlogPosts.Remove(post);
+
+                await _context.SaveChangesAsync();
+
+
+
+                return NoContent();
+
+            }
+
+            catch (Exception ex)
+
+            {
+
+                return StatusCode(500, new { message = "An error occurred while deleting the blog post", error = ex.Message });
+
+            }
+
+        }
+
+
+
+        // PATCH: api/seller/posts/5/publish
+
+        [HttpPatch("posts/{id}/publish")]
+
+        public async Task<IActionResult> TogglePublishStatus(int id, [FromBody] bool isPublished)
+
+        {
+
+            try
+
+            {
+
+                var sellerId = GetUserId();
+
+
+
+                var post = await _context.BlogPosts
+
+                  .FirstOrDefaultAsync(p => p.PostId == id && p.UserId == sellerId);
+
+
+
+                if (post == null)
+
+                {
+
+                    return NotFound(new { message = "Blog post not found" });
+
+                }
+
+
+
+                post.IsPublished = isPublished;
+
+                post.PublishedDate = isPublished ? DateTime.UtcNow : post.PublishedDate;
+
+                post.UpdatedAt = DateTime.UtcNow;
+
+
+
+                await _context.SaveChangesAsync();
+
+
+
+                return Ok(new
+
+                {
+
+                    message = isPublished ? "Post published successfully" : "Post unpublished successfully",
+
+                    isPublished = post.IsPublished,
+
+                    publishedDate = post.PublishedDate
+
+                });
+
+            }
+
+            catch (Exception ex)
+
+            {
+
+                return StatusCode(500, new { message = "An error occurred while updating the publish status", error = ex.Message });
+
+            }
+
+        }
+
+
+
+        // GET: api/seller/posts/categories
+
+        [HttpGet("posts/categories")]
+
+        public async Task<IActionResult> GetBlogCategories()
+
+        {
+
+            var categories = await _context.BlogCategories
+
+              .OrderBy(c => c.Name)
+
+              .Select(c => new BlogCategoryModel
+
+              {
+
+                  CategoryId = c.CategoryId,
+
+                  Name = c.Name,
+
+                  Slug = c.Slug,
+
+                  Description = c.Description
+
+              })
+
+              .ToListAsync();
+
+
+
+            return Ok(categories);
+
+        }
+
+
+
+
+
+        [HttpGet("posts/tags")]
+
+        public async Task<IActionResult> GetBlogTags()
+
+        {
+
+            var tags = await _context.BlogTags
+
+              .OrderBy(t => t.Name)
+
+              .Select(t => new BlogTagModel
+
+              {
+
+                  TagId = t.TagId,
+
+                  Name = t.Name,
+
+                  Slug = t.Slug
+
+              })
+
+              .ToListAsync();
+
+
+
+            return Ok(tags);
+
+        }
+
     }
 
-    public class ChangePasswordDto
-    {
-        public string OldPassword { get; set; }
-        public string NewPassword { get; set; }
-    }
+}
+public class BlogPostCreateModel
+
+{
+
+    [Required]
+
+    public string Title { get; set; }
+
+
+
+    [Required]
+
+    public string Slug { get; set; }
+
+
+
+    [Required]
+
+    public string Content { get; set; }
+
+
+
+    public string? Excerpt { get; set; }
+
+    public string? FeaturedImage { get; set; }
+
+    public bool IsPublished { get; set; } = false;
+
+    public int CategoryId { get; set; }
+
+    public List<int>? TagIds { get; set; }
+
+}
+public class BlogPostUpdateModel
+
+{
+
+    public string? Title { get; set; }
+
+    public string? Slug { get; set; }
+
+    public string? Content { get; set; }
+
+    public string? Excerpt { get; set; }
+
+    public string? FeaturedImage { get; set; }
+
+    public bool? IsPublished { get; set; }
+
+    public int? CategoryId { get; set; }
+
+    public List<int>? TagIds { get; set; }
+
+}
+
+public class BlogCategoryModel
+
+{
+
+    public int CategoryId { get; set; }
+
+    public string Name { get; set; }
+
+    public string? Slug { get; set; }
+
+    public string? Description { get; set; }
+
+}
+
+
+
+public class BlogTagModel
+
+{
+
+    public int TagId { get; set; }
+
+    public string Name { get; set; }
+
+    public string? Slug { get; set; }
+
+}
+public class ChangePasswordDto
+{
+    public string OldPassword { get; set; }
+    public string NewPassword { get; set; }
 }

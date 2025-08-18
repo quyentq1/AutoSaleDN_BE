@@ -187,7 +187,7 @@ public class UserController : ControllerBase
         [FromQuery] List<string>? features = null,
         [FromQuery] string? sortBy = null,
         [FromQuery] int page = 1,
-        [FromQuery] int perPage = 5 
+        [FromQuery] int perPage = 5
     )
     {
         var query = _context.CarListings
@@ -687,7 +687,7 @@ public class UserController : ControllerBase
 
         if (!minMileage.HasValue || !maxMileage.HasValue)
         {
-            return Ok(new List<object>()); 
+            return Ok(new List<object>());
         }
 
         var breakpoints = new List<int> { 10000, 50000, 100000, 150000 };
@@ -735,9 +735,9 @@ public class UserController : ControllerBase
     public async Task<IActionResult> GetPriceRanges()
     {
         var minPrice = await _context.CarListings
-            .MinAsync(c => (decimal?)c.Price); 
+            .MinAsync(c => (decimal?)c.Price);
         var maxPrice = await _context.CarListings
-            .MaxAsync(c => (decimal?)c.Price); 
+            .MaxAsync(c => (decimal?)c.Price);
 
         if (!minPrice.HasValue || !maxPrice.HasValue)
         {
@@ -749,23 +749,23 @@ public class UserController : ControllerBase
 
         decimal[] potentialBreakpoints = new decimal[]
         {
-        0m,             
-        50_000_000m,    
-        100_000_000m,   
-        200_000_000m,   
-        300_000_000m,   
-        500_000_000m,   
-        700_000_000m,   
-        1_000_000_000m, 
-        1_500_000_000m, 
-        2_000_000_000m, 
-        3_000_000_000m, 
-        5_000_000_000m, 
-                        
+        0m,
+        50_000_000m,
+        100_000_000m,
+        200_000_000m,
+        300_000_000m,
+        500_000_000m,
+        700_000_000m,
+        1_000_000_000m,
+        1_500_000_000m,
+        2_000_000_000m,
+        3_000_000_000m,
+        5_000_000_000m,
+
         };
 
         var relevantBreakpoints = potentialBreakpoints
-            .Where(bp => bp >= 0m && bp >= currentMin && bp <= maxPrice.Value) 
+            .Where(bp => bp >= 0m && bp >= currentMin && bp <= maxPrice.Value)
             .OrderBy(bp => bp)
             .ToList();
 
@@ -775,7 +775,7 @@ public class UserController : ControllerBase
             if (0m < firstRangeTo)
             {
                 ranges.Add(new { value = $"0-{firstRangeTo}", label = $"0 - {FormatCurrency(firstRangeTo)} VND" });
-                currentMin = firstRangeTo + 1m; 
+                currentMin = firstRangeTo + 1m;
             }
         }
         else if (currentMin == 0m && relevantBreakpoints.Any())
@@ -786,10 +786,10 @@ public class UserController : ControllerBase
 
         foreach (var bp in relevantBreakpoints)
         {
-            if (currentMin < bp) 
+            if (currentMin < bp)
             {
                 ranges.Add(new { value = $"{currentMin}-{bp}", label = $"{FormatCurrency(currentMin)} - {FormatCurrency(bp)} VND" });
-                currentMin = bp + 1m; 
+                currentMin = bp + 1m;
             }
         }
 
@@ -805,6 +805,263 @@ public class UserController : ControllerBase
 
         return Ok(ranges);
     }
+
+    [HttpGet("posts")]
+
+    public async Task<IActionResult> GetBlogPosts(
+
+  [FromQuery] int page = 1,
+
+  [FromQuery] int pageSize = 10,
+
+  [FromQuery] string search = "",
+
+  [FromQuery] int? categoryId = null,
+
+  [FromQuery] bool? isPublished = null)
+
+    {
+
+        try
+
+        {
+
+            var query = _context.BlogPosts
+
+              .Include(p => p.Category)
+
+              .Include(p => p.BlogPostTags)
+
+                .ThenInclude(pt => pt.Tag)
+
+
+              .AsQueryable();
+
+
+
+            if (!string.IsNullOrEmpty(search))
+
+            {
+
+                query = query.Where(p =>
+
+                  p.Title.Contains(search) ||
+
+                  p.Slug.Contains(search) ||
+
+                  p.Content.Contains(search));
+
+            }
+
+
+
+            if (categoryId.HasValue)
+
+            {
+
+                query = query.Where(p => p.CategoryId == categoryId);
+
+            }
+
+
+
+            if (isPublished.HasValue)
+
+            {
+
+                query = query.Where(p => p.IsPublished == isPublished);
+
+            }
+
+
+
+            var totalCount = await query.CountAsync();
+
+
+
+            var posts = await query
+
+              .OrderByDescending(p => p.CreatedAt)
+
+              .Skip((page - 1) * pageSize)
+
+              .Take(pageSize)
+
+              .Select(p => new
+
+              {
+
+                  p.PostId,
+
+                  p.Title,
+
+                  p.Slug,
+
+                  p.Content,
+
+                  p.Excerpt,
+
+                  p.FeaturedImage,
+
+                  p.IsPublished,
+
+                  p.PublishedDate,
+
+                  p.ViewCount,
+
+                  p.CreatedAt,
+
+                  p.UpdatedAt,
+
+                  Category = new { p.Category.CategoryId, p.Category.Name },
+
+                  Tags = p.BlogPostTags.Select(pt => new { pt.Tag.TagId, pt.Tag.Name })
+
+              })
+
+              .ToListAsync();
+
+
+
+            return Ok(new
+
+            {
+
+                Items = posts,
+
+                TotalCount = totalCount,
+
+                PageNumber = page,
+
+                PageSize = pageSize,
+
+                TotalPages = (int)Math.Ceiling(totalCount / (double)pageSize)
+
+            });
+
+        }
+
+        catch (Exception ex)
+
+        {
+
+            return StatusCode(500, new { message = "An error occurred while retrieving blog posts", error = ex.Message });
+
+        }
+
+    }
+
+    [HttpGet("posts/categories")]
+
+    public async Task<IActionResult> GetBlogCategories()
+
+    {
+
+        var categories = await _context.BlogCategories
+
+          .OrderBy(c => c.Name)
+
+          .Select(c => new BlogCategoryModel
+
+          {
+
+              CategoryId = c.CategoryId,
+
+              Name = c.Name,
+
+              Slug = c.Slug,
+
+              Description = c.Description
+
+          })
+
+          .ToListAsync();
+
+
+
+        return Ok(categories);
+
+    }
+
+
+
+
+
+    [HttpGet("posts/tags")]
+
+    public async Task<IActionResult> GetBlogTags()
+
+    {
+
+        var tags = await _context.BlogTags
+
+          .OrderBy(t => t.Name)
+
+          .Select(t => new BlogTagModel
+
+          {
+
+              TagId = t.TagId,
+
+              Name = t.Name,
+
+              Slug = t.Slug
+
+          })
+
+          .ToListAsync();
+
+
+
+        return Ok(tags);
+
+    }
+    [HttpGet("posts/slug/{slug}")]
+    public async Task<IActionResult> GetBlogPostBySlug(string slug)
+    {
+        try
+        {
+            var post = await _context.BlogPosts
+                .Include(p => p.Category)
+                .Include(p => p.BlogPostTags)
+                    .ThenInclude(pt => pt.Tag)
+                .Where(p => p.Slug == slug && p.IsPublished == true) // Lấy bài viết bằng slug và chỉ lấy bài đã publish
+                .Select(p => new
+                {
+                    p.PostId,
+                    p.Title,
+                    p.Slug,
+                    p.Content,
+                    p.Excerpt,
+                    p.FeaturedImage,
+                    p.IsPublished,
+                    p.PublishedDate,
+                    p.ViewCount,
+                    p.CreatedAt,
+                    p.UpdatedAt,
+                    Category = new { p.Category.CategoryId, p.Category.Name },
+                    Tags = p.BlogPostTags.Select(pt => new { pt.Tag.TagId, pt.Tag.Name })
+                })
+                .FirstOrDefaultAsync();
+
+            if (post == null)
+            {
+                return NotFound(new { message = "Blog post not found" });
+            }
+
+            // Tăng ViewCount nếu bạn muốn theo dõi lượt xem
+            // post.ViewCount = (post.ViewCount ?? 0) + 1;
+            // await _context.SaveChangesAsync();
+
+            return Ok(post);
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(500, new { message = "An error occurred while retrieving the blog post", error = ex.Message });
+        }
+    }
+
+
 
     private string FormatCurrency(decimal amount)
     {
@@ -823,7 +1080,7 @@ public class UserController : ControllerBase
             decimal thousand = amount / 1_000m;
             return $"{thousand:0.#} thousand";
         }
-     
+
         return amount.ToString("N0", CultureInfo.InvariantCulture);
     }
 
