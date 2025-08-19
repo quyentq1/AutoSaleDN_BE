@@ -782,480 +782,305 @@ namespace AutoSaleDN.Controllers
 
 
         [HttpGet("posts/{id}")]
-
         public async Task<IActionResult> GetBlogPost(int id)
-
         {
-
             try
-
             {
-
                 var sellerId = GetUserId();
 
                 var post = await _context.BlogPosts
-
-                  .Include(p => p.Category)
-
-                  .Include(p => p.BlogPostTags)
-
-                    .ThenInclude(pt => pt.Tag)
-
-                  .Where(p => p.PostId == id && p.UserId == sellerId)
-
-                  .Select(p => new
-
-                  {
-
-                      p.PostId,
-
-                      p.Title,
-
-                      p.Slug,
-
-                      p.Content,
-
-                      p.Excerpt,
-
-                      p.FeaturedImage,
-
-                      p.IsPublished,
-
-                      p.PublishedDate,
-
-                      p.ViewCount,
-
-                      p.CreatedAt,
-
-                      p.UpdatedAt,
-
-                      CategoryId = p.Category.CategoryId,
-
-                      TagIds = p.BlogPostTags.Select(pt => pt.Tag.TagId).ToList()
-
-                  })
-
-                  .FirstOrDefaultAsync();
-
-
+                    .Include(p => p.Category)
+                    .Include(p => p.BlogPostTags)
+                        .ThenInclude(pt => pt.Tag)
+                    .Where(p => p.PostId == id && p.UserId == sellerId)
+                    .Select(p => new
+                    {
+                        p.PostId,
+                        p.Title,
+                        p.Slug,
+                        p.Content,
+                        p.Excerpt,
+                        p.FeaturedImage,
+                        p.IsPublished,
+                        p.PublishedDate,
+                        p.ViewCount,
+                        p.CreatedAt,
+                        p.UpdatedAt,
+                        Category = new
+                        {
+                            p.Category.CategoryId,
+                            p.Category.Name,
+                            p.Category.Slug,
+                        },
+                        Tags = p.BlogPostTags.Select(pt => new
+                        {
+                            pt.Tag.TagId,
+                            pt.Tag.Name,
+                            pt.Tag.Slug
+                        }).ToList(),
+                    })
+                    .FirstOrDefaultAsync();
 
                 if (post == null)
-
                 {
-
                     return NotFound(new { message = "Blog post not found" });
-
                 }
 
-
-
                 return Ok(post);
-
             }
-
             catch (Exception ex)
-
             {
-
                 return StatusCode(500, new { message = "An error occurred while retrieving the blog post", error = ex.Message });
-
             }
-
         }
 
 
 
         [HttpPost("posts")]
-
         public async Task<IActionResult> CreateBlogPost([FromBody] BlogPostCreateModel model)
-
         {
-
             try
-
             {
-
                 var sellerId = GetUserId();
 
-
-
-                // Validate category exists
-
-                var category = await _context.BlogCategories
-
-          .FirstOrDefaultAsync(c => c.CategoryId == model.CategoryId);
-
-
+                // Validate category exists
+                var category = await _context.BlogCategories
+                    .FirstOrDefaultAsync(c => c.CategoryId == model.CategoryId);
 
                 if (category == null)
-
                 {
-
                     return BadRequest(new { message = "Invalid category ID" });
-
                 }
 
+                // --- NEW TAGS LOGIC ---
+                var allTagIds = new List<int>();
 
-
-                // Create new post
-
-                var post = new BlogPost
-
+                // 1. Process existing tags from TagIds
+                if (model.TagIds != null && model.TagIds.Any())
                 {
+                    var existingTagIds = await _context.BlogTags
+                        .Where(t => model.TagIds.Contains(t.TagId))
+                        .Select(t => t.TagId)
+                        .ToListAsync();
 
+                    if (existingTagIds.Count != model.TagIds.Count)
+                    {
+                        var invalidTagIds = model.TagIds.Except(existingTagIds).ToList();
+                        return BadRequest(new { message = $"Invalid tag ID(s): {string.Join(", ", invalidTagIds)}" });
+                    }
+                    allTagIds.AddRange(existingTagIds);
+                }
+
+                // 2. Process new tags from NewTagNames
+                if (model.NewTagNames != null && model.NewTagNames.Any())
+                {
+                    foreach (var newTagName in model.NewTagNames.Distinct())
+                    {
+                        var existingTag = await _context.BlogTags
+                            .FirstOrDefaultAsync(t => t.Name.ToLower() == newTagName.ToLower());
+
+                        if (existingTag != null)
+                        {
+                            // Tag with this name already exists, use its ID
+                            allTagIds.Add(existingTag.TagId);
+                        }
+                        else
+                        {
+                            // Create new tag
+                            var newTag = new BlogTag { Name = newTagName, Slug = newTagName };
+                            _context.BlogTags.Add(newTag);
+                            await _context.SaveChangesAsync(); // Save to get the new TagId
+                            allTagIds.Add(newTag.TagId);
+                        }
+                    }
+                }
+                // --- END OF NEW TAGS LOGIC ---
+
+                // Create new post
+                var post = new BlogPost
+                {
                     Title = model.Title,
-
                     Slug = model.Slug,
-
                     Content = model.Content,
-
                     Excerpt = model.Excerpt,
-
                     FeaturedImage = model.FeaturedImage,
-
                     IsPublished = model.IsPublished,
-
                     PublishedDate = model.IsPublished ? DateTime.UtcNow : null,
-
                     CategoryId = model.CategoryId,
-
                     UserId = sellerId,
-
-                    CreatedAt = DateTime.UtcNow,
-
-                    BlogPostTags = new List<BlogPostTag>()
-
+                    CreatedAt = DateTime.UtcNow
                 };
 
-
-
-                // Add tags if provided
-
-                if (model.TagIds != null && model.TagIds.Any())
-
+                // Add BlogPostTag entries for all tags
+                post.BlogPostTags = allTagIds.Select(tagId => new BlogPostTag
                 {
-
-                    var existingTags = await _context.BlogTags
-
-                      .Where(t => model.TagIds.Contains(t.TagId))
-
-                      .ToListAsync();
-
-
-
-                    foreach (var tagId in model.TagIds)
-
-                    {
-
-                        if (existingTags.All(t => t.TagId != tagId))
-
-                        {
-
-                            return BadRequest(new { message = $"Invalid tag ID: {tagId}" });
-
-                        }
-
-
-
-                        post.BlogPostTags.Add(new BlogPostTag
-
-                        {
-
-                            Post = post,
-
-                            TagId = tagId
-
-                        });
-
-                    }
-
-                }
-
-
+                    TagId = tagId
+                }).ToList();
 
                 _context.BlogPosts.Add(post);
-
                 await _context.SaveChangesAsync();
 
-
-
-                // Return the created post with related data
-
-                var createdPost = await _context.BlogPosts
-
-          .Include(p => p.Category)
-
-          .Include(p => p.BlogPostTags)
-
-            .ThenInclude(pt => pt.Tag)
-
-          .Where(p => p.PostId == post.PostId)
-
-          .Select(p => new
-
-          {
-
-              p.PostId,
-
-              p.Title,
-
-              p.Slug,
-
-              p.Content,
-
-              p.Excerpt,
-
-              p.FeaturedImage,
-
-              p.IsPublished,
-
-              p.PublishedDate,
-
-              p.ViewCount,
-
-              p.CreatedAt,
-
-              p.UpdatedAt,
-
-              Category = new { p.Category.CategoryId, p.Category.Name },
-
-              Tags = p.BlogPostTags.Select(pt => new { pt.Tag.TagId, pt.Tag.Name })
-
-          })
-
-          .FirstOrDefaultAsync();
-
-
+                // Return the created post with related data
+                var createdPost = await _context.BlogPosts
+                    .Include(p => p.Category)
+                    .Include(p => p.BlogPostTags)
+                        .ThenInclude(pt => pt.Tag)
+                    .Where(p => p.PostId == post.PostId)
+                    .Select(p => new
+                    {
+                        p.PostId,
+                        p.Title,
+                        p.Slug,
+                        p.Content,
+                        p.Excerpt,
+                        p.FeaturedImage,
+                        p.IsPublished,
+                        p.PublishedDate,
+                        p.ViewCount,
+                        p.CreatedAt,
+                        p.UpdatedAt,
+                        Category = new { p.Category.CategoryId, p.Category.Name },
+                        Tags = p.BlogPostTags.Select(pt => new { pt.Tag.TagId, pt.Tag.Name })
+                    })
+                    .FirstOrDefaultAsync();
 
                 return CreatedAtAction(nameof(GetBlogPost), new { id = post.PostId }, createdPost);
-
             }
-
             catch (Exception ex)
-
             {
-
                 return StatusCode(500, new { message = "An error occurred while creating the blog post", error = ex.Message });
-
             }
-
         }
 
 
+        // PUT: api/seller/posts/5
 
-
-
-        // PUT: api/seller/posts/5
-
-        [HttpPut("posts/{id}")]
-
+        [HttpPut("posts/{id}")]
         public async Task<IActionResult> UpdateBlogPost(int id, [FromBody] BlogPostUpdateModel model)
-
         {
-
             try
-
             {
-
                 var sellerId = GetUserId();
 
-
-
                 var post = await _context.BlogPosts
-
-                  .Include(p => p.BlogPostTags)
-
-                  .FirstOrDefaultAsync(p => p.PostId == id && p.UserId == sellerId);
-
-
+                    .Include(p => p.BlogPostTags)
+                    .FirstOrDefaultAsync(p => p.PostId == id && p.UserId == sellerId);
 
                 if (post == null)
-
                 {
-
                     return NotFound(new { message = "Blog post not found" });
-
                 }
 
-
-
-                // Update post properties
-
-                if (model.Title != null) post.Title = model.Title;
-
+                // Update post properties
+                if (model.Title != null) post.Title = model.Title;
                 if (model.Slug != null) post.Slug = model.Slug;
-
                 if (model.Content != null) post.Content = model.Content;
-
                 if (model.Excerpt != null) post.Excerpt = model.Excerpt;
-
                 if (model.FeaturedImage != null) post.FeaturedImage = model.FeaturedImage;
-
-
-
                 post.UpdatedAt = DateTime.UtcNow;
 
-
-
-                // Update category if provided
-
-                if (model.CategoryId.HasValue)
-
+                // Update category if provided
+                if (model.CategoryId.HasValue)
                 {
-
                     var category = await _context.BlogCategories
-
-                      .FirstOrDefaultAsync(c => c.CategoryId == model.CategoryId);
-
-
-
+                        .FirstOrDefaultAsync(c => c.CategoryId == model.CategoryId);
                     if (category == null)
-
                     {
-
                         return BadRequest(new { message = "Invalid category ID" });
-
                     }
-
-
-
                     post.CategoryId = category.CategoryId;
-
                 }
 
-
-
-                // Update tags if provided
-
-                if (model.TagIds != null)
-
+                // --- NEW TAGS LOGIC ---
+                if (model.TagIds != null || model.NewTagNames != null)
                 {
+                    var allTagIds = new List<int>();
 
-                    // Remove existing tags
-
-                    _context.BlogPostTags.RemoveRange(post.BlogPostTags);
-
-
-
-                    // Add new tags
-
-                    if (model.TagIds.Any())
-
+                    // 1. Process existing tags from TagIds
+                    if (model.TagIds != null && model.TagIds.Any())
                     {
+                        var existingTagIds = await _context.BlogTags
+                            .Where(t => model.TagIds.Contains(t.TagId))
+                            .Select(t => t.TagId)
+                            .ToListAsync();
+                        allTagIds.AddRange(existingTagIds);
+                    }
 
-                        var tags = await _context.BlogTags
-
-                          .Where(t => model.TagIds.Contains(t.TagId))
-
-                          .ToListAsync();
-
-
-
-                        post.BlogPostTags = tags.Select(tag => new BlogPostTag
-
+                    // 2. Process new tags from NewTagNames
+                    if (model.NewTagNames != null && model.NewTagNames.Any())
+                    {
+                        foreach (var newTagName in model.NewTagNames.Distinct())
                         {
+                            var existingTag = await _context.BlogTags
+                                .FirstOrDefaultAsync(t => t.Name.ToLower() == newTagName.ToLower());
 
-                            PostId = post.PostId,
-
-                            TagId = tag.TagId
-
-                        }).ToList();
-
+                            if (existingTag != null)
+                            {
+                                allTagIds.Add(existingTag.TagId);
+                            }
+                            else
+                            {
+                                var newTag = new BlogTag { Name = newTagName, Slug = newTagName };
+                                _context.BlogTags.Add(newTag);
+                                await _context.SaveChangesAsync();
+                                allTagIds.Add(newTag.TagId);
+                            }
+                        }
                     }
 
-                }
-
-
-
-                // Update published status if provided
-
-                if (model.IsPublished.HasValue)
-
-                {
-
-                    post.IsPublished = model.IsPublished.Value;
-
-                    if (model.IsPublished.Value && !post.PublishedDate.HasValue)
-
+                    // Remove existing tags and add new ones
+                    _context.BlogPostTags.RemoveRange(post.BlogPostTags);
+                    post.BlogPostTags = allTagIds.Distinct().Select(tagId => new BlogPostTag
                     {
-
-                        post.PublishedDate = DateTime.UtcNow;
-
-                    }
-
+                        PostId = post.PostId,
+                        TagId = tagId
+                    }).ToList();
                 }
+                // --- END OF NEW TAGS LOGIC ---
 
-
+                // Update published status if provided
+                if (model.IsPublished.HasValue)
+                {
+                    post.IsPublished = model.IsPublished.Value;
+                    if (model.IsPublished.Value && !post.PublishedDate.HasValue)
+                    {
+                        post.PublishedDate = DateTime.UtcNow;
+                    }
+                }
 
                 await _context.SaveChangesAsync();
 
-
-
-                // Return the updated post
-
-                var updatedPost = await _context.BlogPosts
-
-          .Include(p => p.Category)
-
-          .Include(p => p.BlogPostTags)
-
-            .ThenInclude(pt => pt.Tag)
-
-          .Where(p => p.PostId == id)
-
-          .Select(p => new
-
-          {
-
-              p.PostId,
-
-              p.Title,
-
-              p.Slug,
-
-              p.Content,
-
-              p.Excerpt,
-
-              p.FeaturedImage,
-
-              p.IsPublished,
-
-              p.PublishedDate,
-
-              p.ViewCount,
-
-              p.CreatedAt,
-
-              p.UpdatedAt,
-
-              Category = new { p.Category.CategoryId, p.Category.Name },
-
-              Tags = p.BlogPostTags.Select(pt => new { pt.Tag.TagId, pt.Tag.Name })
-
-          })
-
-          .FirstOrDefaultAsync();
-
-
+                // Return the updated post
+                var updatedPost = await _context.BlogPosts
+                    .Include(p => p.Category)
+                    .Include(p => p.BlogPostTags)
+                        .ThenInclude(pt => pt.Tag)
+                    .Where(p => p.PostId == id)
+                    .Select(p => new
+                    {
+                        p.PostId,
+                        p.Title,
+                        p.Slug,
+                        p.Content,
+                        p.Excerpt,
+                        p.FeaturedImage,
+                        p.IsPublished,
+                        p.PublishedDate,
+                        p.ViewCount,
+                        p.CreatedAt,
+                        p.UpdatedAt,
+                        Category = new { p.Category.CategoryId, p.Category.Name },
+                        Tags = p.BlogPostTags.Select(pt => new { pt.Tag.TagId, pt.Tag.Name })
+                    })
+                    .FirstOrDefaultAsync();
 
                 return Ok(updatedPost);
-
             }
-
             catch (Exception ex)
-
             {
-
                 return StatusCode(500, new { message = "An error occurred while updating the blog post", error = ex.Message });
-
             }
-
         }
-
-
-
-        // DELETE: api/seller/posts/5
 
         [HttpDelete("posts/{id}")]
 
@@ -1307,9 +1132,6 @@ namespace AutoSaleDN.Controllers
 
         }
 
-
-
-        // PATCH: api/seller/posts/5/publish
 
         [HttpPatch("posts/{id}/publish")]
 
@@ -1378,9 +1200,6 @@ namespace AutoSaleDN.Controllers
         }
 
 
-
-        // GET: api/seller/posts/categories
-
         [HttpGet("posts/categories")]
 
         public async Task<IActionResult> GetBlogCategories()
@@ -1412,10 +1231,6 @@ namespace AutoSaleDN.Controllers
             return Ok(categories);
 
         }
-
-
-
-
 
         [HttpGet("posts/tags")]
 
@@ -1480,6 +1295,8 @@ public class BlogPostCreateModel
 
     public int CategoryId { get; set; }
 
+    public List<string> NewTagNames { get; set; }
+
     public List<int>? TagIds { get; set; }
 
 }
@@ -1502,6 +1319,8 @@ public class BlogPostUpdateModel
     public int? CategoryId { get; set; }
 
     public List<int>? TagIds { get; set; }
+
+    public List<string> NewTagNames { get; set; }
 
 }
 

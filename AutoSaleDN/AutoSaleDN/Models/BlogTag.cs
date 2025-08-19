@@ -8,7 +8,7 @@ namespace AutoSaleDN.Models
         public int TagId { get; set; }
         [Required, StringLength(255)]
         public string Name { get; set; }
-        public string? Slug { get; set; } // Thuộc tính bổ sung
+        public string? Slug { get; set; }
         public ICollection<BlogPostTag>? BlogPostTags { get; set; }
     }
 }
