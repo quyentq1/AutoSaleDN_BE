@@ -32,8 +32,8 @@ public class UserController : ControllerBase
     [HttpPost("register")]
     public async Task<IActionResult> Register([FromBody] RegisterDto model)
     {
-        if (await _context.Users.AnyAsync(x => x.Name == model.Name || x.Email == model.Email))
-            return BadRequest("Username or email already exists.");
+        if (await _context.Users.AnyAsync(x => x.Email == model.Email))
+            return BadRequest("Email already exists.");
 
         var user = new User
         {

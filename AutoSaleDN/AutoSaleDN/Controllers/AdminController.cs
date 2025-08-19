@@ -6,6 +6,8 @@ using Microsoft.AspNetCore.Authorization;
 using AutoSaleDN.DTO;
 using System.Reflection;
 using OfficeOpenXml;
+using AutoSaleDN.Services;
+using System.Text;
 
 namespace AutoSaleDN.Controllers
 {
@@ -16,9 +18,12 @@ namespace AutoSaleDN.Controllers
     public class AdminController : ControllerBase
     {
         private readonly AutoSaleDbContext _context;
-        public AdminController(AutoSaleDbContext context)
+        private readonly IEmailService _emailService;
+        public AdminController(AutoSaleDbContext context, IEmailService emailService)
         {
             _context = context;
+            _emailService = emailService;
+
         }
         [HttpGet("customers")]
         public async Task<ActionResult<IEnumerable<object>>> GetCustomers()
@@ -682,6 +687,78 @@ namespace AutoSaleDN.Controllers
                 _context.CarInventories.Add(inventoryLog);
 
                 await _context.SaveChangesAsync();
+
+                // --- Logic gửi email đã được cập nhật ---
+                var customerEmails = await _context.Users
+                    .Where(u => u.Role == "Customer")
+                    .Select(u => u.Email)
+                    .ToListAsync();
+
+                // Lấy tên Model từ ModelId
+                var carModel = await _context.CarModels
+                    .Where(m => m.ModelId == dto.ModelId)
+                    .Select(m => m.Name)
+                    .FirstOrDefaultAsync();
+
+                var carImagesHtml = new StringBuilder();
+                if (dto.ImageUrls != null && dto.ImageUrls.Any())
+                {
+                    carImagesHtml.Append("<div style=\"text-align:center; margin-top:20px;\">");
+                    foreach (var url in dto.ImageUrls)
+                    {
+                        carImagesHtml.Append($"<img src=\"{url}\" alt=\"{carModel}\" style=\"width:100%;max-width:600px;height:auto;margin-bottom:15px;border-radius:8px;border:1px solid #e0e0e0;\"/>");
+                    }
+                    carImagesHtml.Append("</div>");
+                }
+
+                var emailSubject = $"New Car Alert: A new {carModel} is now available!";
+                var emailBody = $@"
+        <div style=""font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; background-color: #f7f7f7; padding: 20px; line-height: 1.6; color: #333;"">
+            <div style=""max-width: 600px; margin: auto; background-color: #ffffff; padding: 20px; border-radius: 12px; box-shadow: 0 4px 8px rgba(0,0,0,0.1);"">
+                <div style=""text-align: center; padding-bottom: 20px; border-bottom: 2px solid #007bff;"">
+                    <h1 style=""color: #007bff; font-size: 28px; margin: 0;"">AutoSale Đà Nẵng</h1>
+                    <p style=""font-size: 16px; color: #555; margin: 5px 0 0;"">Your next dream car awaits!</p>
+                </div>
+                <div style=""padding: 20px 0; text-align: center;"">
+                    <h2 style=""font-size: 24px; color: #2a2a2a; margin-top: 0;"">New Arrival!</h2>
+                    <p style=""font-size: 18px; color: #555;"">We're thrilled to announce a new addition to our inventory:</p>
+                </div>
+                {carImagesHtml.ToString()}
+                <div style=""padding: 20px 0; border-top: 1px solid #e0e0e0; border-bottom: 1px solid #e0e0e0;"">
+                    <table style=""width: 100%; border-collapse: collapse;"">
+                        <tr>
+                            <td style=""padding: 8px 0;""><b style=""color: #007bff;"">Model:</b></td>
+                            <td style=""padding: 8px 0; text-align: right;"">{carModel}</td>
+                        </tr>
+                        <tr>
+                            <td style=""padding: 8px 0;""><b style=""color: #007bff;"">Year:</b></td>
+                            <td style=""padding: 8px 0; text-align: right;"">{dto.Year}</td>
+                        </tr>
+                        <tr>
+                            <td style=""padding: 8px 0;""><b style=""color: #007bff;"">Price:</b></td>
+                            <td style=""padding: 8px 0; text-align: right; color: #d9534f; font-weight: bold;"">{car.Price?.ToString("C")}</td>
+                        </tr>
+                    </table>
+                </div>
+                <div style=""text-align: center; padding-top: 25px;"">
+                    <a href=""https://autosaledn.store"" style=""display: inline-block; padding: 12px 25px; background-color: #007bff; color: #ffffff; text-decoration: none; border-radius: 5px; font-weight: bold; font-size: 16px; box-shadow: 0 2px 4px rgba(0,0,0,0.2); transition: background-color 0.3s;"">
+                        View Details on Website
+                    </a>
+                </div>
+                <div style=""text-align: center; padding-top: 25px; color: #888;"">
+                    <p style=""margin: 0; font-size: 12px;"">Thank you for your interest!</p>
+                    <p style=""margin: 5px 0 0; font-size: 12px;"">The AutoSale Team</p>
+                </div>
+            </div>
+        </div>
+        ";
+
+                foreach (var email in customerEmails)
+                {
+                    await _emailService.SendEmailAsync(email, emailSubject, emailBody);
+                }
+                // --- Kết thúc logic gửi email đã cập nhật ---
+
                 await transaction.CommitAsync();
 
                 return Ok(new { success = true, message = "Car added successfully.", listingId = car.ListingId });
@@ -1123,9 +1200,11 @@ namespace AutoSaleDN.Controllers
         {
             var y = year ?? DateTime.UtcNow.Year;
             var m = month ?? DateTime.UtcNow.Month;
-            var sales = await _context.CarSales
-                .Where(s => s.SaleDate.HasValue && s.SaleDate.Value.Year == y && s.SaleDate.Value.Month == m)
-                .SumAsync(s => (decimal?)s.FinalPrice) ?? 0;
+            var sales = await _context.Payments
+                .Where(p => p.PaymentStatus == "completed")
+                .Where(p => p.DateOfPayment.Year == y && p.DateOfPayment.Month == m)
+                .Where(p => p.PaymentForSale != null)
+                .SumAsync(p => (decimal?)p.Amount) ?? 0;
             return Ok(new { year = y, month = m, totalRevenue = sales });
         }
 
@@ -1133,9 +1212,11 @@ namespace AutoSaleDN.Controllers
         public async Task<IActionResult> GetYearlyRevenueReport(int? year = null)
         {
             var y = year ?? DateTime.UtcNow.Year;
-            var sales = await _context.CarSales
-                .Where(s => s.SaleDate.HasValue && s.SaleDate.Value.Year == y)
-                .SumAsync(s => (decimal?)s.FinalPrice) ?? 0;
+            var sales = await _context.Payments
+                .Where(p => p.PaymentStatus == "completed")
+                .Where(p => p.DateOfPayment.Year == y)
+                .Where(p => p.PaymentForSale != null)
+                .SumAsync(p => (decimal?)p.Amount) ?? 0;
             return Ok(new { year = y, totalRevenue = sales });
         }
 
@@ -2033,6 +2114,27 @@ namespace AutoSaleDN.Controllers
             }
         }
 
+        [HttpPost("showrooms/add")]
+        public async Task<IActionResult> Addshowrooms([FromBody] ShowroomAddDto showroom)
+        {
+            if (await _context.StoreLocations.AnyAsync(x => x.Name == showroom.Name))
+                return BadRequest("Showroom Name already exists.");
+
+            var showrooms = new StoreLocation
+            {
+                Name = showroom.Name,
+                Address = showroom.Address
+            };
+            _context.StoreLocations.Add(showrooms);
+            await _context.SaveChangesAsync();
+            return Ok(new { message = "Add New Showroom successful" });
+        }
+        public class ShowroomAddDto
+        {
+            public string Name { get; set; }
+            public string Address { get; set; }
+        }
+
         // Request model for updating transaction status
         public class UpdateTransactionStatusRequest
         {
@@ -2147,8 +2249,12 @@ namespace AutoSaleDN.Controllers
                     return StatusCode(500, new { message = "Error during inventory import.", error = ex.Message, innerException = ex.InnerException?.Message });
                 }
             }
-        }
-       
+
+            }
+
+
+
+
 
         public enum InventoryTransactionType
         {
