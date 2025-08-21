@@ -34,6 +34,7 @@ namespace AutoSaleDN.Models
         public ICollection<BlogPost> BlogPosts { get; set; }
         public ICollection<CarSale> CarSales { get; set; }
 
+
         public ICollection<DeliveryAddress>? DeliveryAddresses { get; set; }
     }
 }

@@ -478,6 +478,11 @@ public async Task<IActionResult> GetCars(
     public async Task<IActionResult> GetCarDetail(int id)
     {
         var car = await _context.CarListings
+            .Include(c => c.StoreListings)
+                .ThenInclude(sl => sl.StoreLocation)
+                    .ThenInclude(sloc => sloc.Users)
+
+            // Các Include khác
             .Include(c => c.Model)
                 .ThenInclude(m => m.CarManufacturer)
             .Include(c => c.Specifications)
@@ -498,29 +503,31 @@ public async Task<IActionResult> GetCars(
                     .ThenInclude(cs => cs.FullPayment)
             .Include(c => c.Reviews)
                 .ThenInclude(r => r.User)
-            .Include(c => c.StoreListings)
-                .ThenInclude(cs => cs.StoreLocation)
             .FirstOrDefaultAsync(c => c.ListingId == id);
 
         if (car == null)
+        {
             return NotFound(new { message = "Car not found." });
+        }
 
+        // Lấy thông tin người bán từ showroom đầu tiên
+        var firstShowroom = car.StoreListings?.FirstOrDefault()?.StoreLocation;
+        var seller = firstShowroom?.Users?.FirstOrDefault();
+
+        // Logic xử lý trạng thái xe (giữ nguyên)
         var allCarSalesForThisCar = car.StoreListings?
             .SelectMany(sl => sl.CarSales ?? new List<CarSale>())
             .ToList();
-
         var latestRelevantSale = allCarSalesForThisCar?
-        .OrderByDescending(s => s.CreatedAt)
-        .FirstOrDefault(s =>
-            s.SaleStatus?.StatusName == "Deposit Paid" ||
-            s.SaleStatus?.StatusName == "Payment Complete" ||
-            s.SaleStatus?.StatusName == "Pending Deposit" ||
-            s.SaleStatus?.StatusName == "Pending Full Payment"
-        );
-
+            .OrderByDescending(s => s.CreatedAt)
+            .FirstOrDefault(s =>
+                s.SaleStatus?.StatusName == "Deposit Paid" ||
+                s.SaleStatus?.StatusName == "Payment Complete" ||
+                s.SaleStatus?.StatusName == "Pending Deposit" ||
+                s.SaleStatus?.StatusName == "Pending Full Payment"
+            );
         string saleStatusDisplay = "Available";
         string paymentStatusDisplay = null;
-
         if (latestRelevantSale != null)
         {
             if (latestRelevantSale.SaleStatus?.StatusName == "Payment Complete")
@@ -545,12 +552,16 @@ public async Task<IActionResult> GetCars(
             }
         }
 
-
         var carDetail = new
         {
             car.ListingId,
             car.ModelId,
-            car.UserId,
+
+            // Trả về thông tin của người bán ĐÚNG tại showroom
+            UserId = seller?.UserId,
+            SellerName = seller?.FullName,
+            SellerEmail = seller?.Email,
+
             car.Year,
             car.Mileage,
             car.Price,
@@ -604,7 +615,7 @@ public async Task<IActionResult> GetCars(
                 shh.TaxRate,
                 shh.RegistrationFee
             }).ToList() : null,
-            SalesHistory = car.CarSales != null ? car.CarSales.Select(s => new
+            SalesHistory = allCarSalesForThisCar != null ? allCarSalesForThisCar.Select(s => new
             {
                 s.SaleId,
                 s.FinalPrice,
