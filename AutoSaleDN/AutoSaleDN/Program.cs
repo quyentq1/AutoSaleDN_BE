@@ -5,6 +5,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using System.Text;
 using System.Text.Json.Serialization;
+using OfficeOpenXml;
 
 var builder = WebApplication.CreateBuilder(args);
 builder.Configuration.AddJsonFile("appsettings.json", false, true);
@@ -59,7 +60,7 @@ builder.Services.AddCors(options =>
         });
 });
 
-
+ExcelPackage.LicenseContext = LicenseContext.NonCommercial;
 var app = builder.Build();
 
 // Configure the HTTP request pipeline.

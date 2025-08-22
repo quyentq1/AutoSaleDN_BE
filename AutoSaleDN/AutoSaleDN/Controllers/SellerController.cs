@@ -282,59 +282,7 @@ namespace AutoSaleDN.Controllers
             public DateTime? ActualDeliveryDate { get; set; }
             public string Notes { get; set; }
         }
-
-        [HttpPut("orders/{id}/status")]
-        public async Task<IActionResult> UpdateOrderStatus(int id, [FromBody] UpdateOrderDeliveryStatusDto dto)
-        {
-            // ... (Giữ nguyên phần xác thực và tìm order)
-            var userId = GetUserId();
-            var seller = await _context.Users.FirstOrDefaultAsync(u => u.UserId == userId && u.Role == "Seller");
-
-            if (seller == null || !seller.StoreLocationId.HasValue)
-            {
-                return Unauthorized(new { message = "Seller profile or store location not found." });
-            }
-
-            var storeLocationId = seller.StoreLocationId.Value;
-
-            var order = await _context.CarSales
-                .Include(o => o.StoreListing)
-                .FirstOrDefaultAsync(o => o.SaleId == id && o.StoreListing.StoreLocationId == storeLocationId);
-
-            if (order == null)
-            {
-                return NotFound("Order not found or you are not authorized to update this order.");
-            }
-
-            // Kiểm tra SaleStatusId có hợp lệ không
-            var newStatus = await _context.SaleStatus.FindAsync(dto.SaleStatusId);
-            if (newStatus == null)
-            {
-                return BadRequest(new { message = "Invalid status ID." });
-            }
-
-            // Cập nhật các trường
-            order.SaleStatusId = dto.SaleStatusId;
-            order.ExpectedDeliveryDate = dto.ExpectedDeliveryDate;
-            order.ActualDeliveryDate = dto.ActualDeliveryDate;
-            order.Notes = dto.Notes;
-            order.UpdatedAt = DateTime.UtcNow;
-
-            var statusHistoryEntry = new SaleStatusHistory
-            {
-                SaleId = order.SaleId,
-                SaleStatusId = dto.SaleStatusId,
-                UserId = userId,
-                Notes = dto.Notes,
-                Timestamp = DateTime.UtcNow
-            };
-            _context.SaleStatusHistory.Add(statusHistoryEntry);
-
-            await _context.SaveChangesAsync();
-
-            return Ok(new { message = "Order status updated successfully." });
-        }
-
+        
         private async Task<int?> GetSellerShowroomId()
         {
             var userIdClaim = User.FindFirst(ClaimTypes.NameIdentifier);
@@ -1082,7 +1030,120 @@ namespace AutoSaleDN.Controllers
             }
         }
 
-        [HttpDelete("posts/{id}")]
+        // Paste this entire method into your SellerController.cs file
+
+        // Đặt trong file SellerController.cs
+
+        [HttpPut("orders/{orderId}/status")]
+        public async Task<IActionResult> UpdateOrderStatus(int orderId, [FromBody] UpdateOrderStatusDto dto)
+        {
+            // Bắt đầu một transaction để đảm bảo tất cả các thay đổi đều thành công hoặc không có gì cả
+            using var transaction = await _context.Database.BeginTransactionAsync();
+            try
+            {
+                var sellerId = GetUserId();
+
+                var carSale = await _context.CarSales
+                    .Include(cs => cs.StoreListing)
+                    .FirstOrDefaultAsync(cs => cs.SaleId == orderId && cs.StoreListing.StoreLocation.Users.Any(u => u.UserId == sellerId));
+
+                if (carSale == null)
+                {
+                    return NotFound(new { message = "Order not found or you do not have permission to modify it." });
+                }
+
+                var newStatus = await _context.SaleStatus.FindAsync(dto.NewStatusId);
+                if (newStatus == null)
+                {
+                    return BadRequest(new { message = "Invalid status ID." });
+                }
+
+                var paymentCompleteStatus = await _context.SaleStatus.FirstOrDefaultAsync(s => s.StatusName == "Payment Complete");
+                if (paymentCompleteStatus == null)
+                {
+                    return StatusCode(500, new { message = "Critical status 'Payment Complete' not found." });
+                }
+
+                // --- LOGIC ĐẶC BIỆT KHI GIAO HÀNG ---
+                if (newStatus.StatusName == "Delivered")
+                {
+                    bool needsPayment = (carSale.RemainingBalance.HasValue && carSale.RemainingBalance > 0) || carSale.FullPaymentId == null;
+
+                    if (needsPayment)
+                    {
+                        // 1. Tự động tạo bản ghi thanh toán cuối cùng
+                        var finalPayment = new Payment
+                        {
+                            UserId = carSale.CustomerId,
+                            ListingId = carSale.StoreListing.ListingId,
+                            PaymentForSaleId = carSale.SaleId,
+                            TransactionId = $"FINAL-{Guid.NewGuid().ToString().Substring(0, 8).ToUpper()}",
+                            Amount = carSale.RemainingBalance ?? carSale.FinalPrice,
+                            PaymentMethod = "internal_settlement", // Ghi nhận thanh toán nội bộ
+                            PaymentStatus = "completed",
+                            PaymentPurpose = "final_settlement_on_delivery",
+                            DateOfPayment = DateTime.UtcNow,
+                            CreatedAt = DateTime.UtcNow,
+                            UpdatedAt = DateTime.UtcNow
+                        };
+                        _context.Payments.Add(finalPayment);
+                        await _context.SaveChangesAsync();
+
+                        // 2. Cập nhật đơn hàng với thông tin thanh toán
+                        carSale.FullPaymentId = finalPayment.PaymentId;
+                        carSale.RemainingBalance = 0;
+
+                        // Cập nhật trạng thái thành "Payment Complete" trước
+                        carSale.SaleStatusId = paymentCompleteStatus.SaleStatusId;
+                        carSale.UpdatedAt = DateTime.UtcNow;
+                        _context.SaleStatusHistory.Add(new SaleStatusHistory
+                        {
+                            SaleId = carSale.SaleId,
+                            SaleStatusId = paymentCompleteStatus.SaleStatusId,
+                            UserId = sellerId, // Người bán đã thực hiện hành động
+                            Notes = "Payment automatically settled upon delivery.",
+                            Timestamp = DateTime.UtcNow
+                        });
+                        await _context.SaveChangesAsync();
+                    }
+
+                    // 3. Cập nhật ngày giao hàng thực tế
+                    carSale.ActualDeliveryDate = DateTime.UtcNow;
+                }
+
+                // 4. Cập nhật trạng thái cuối cùng và lưu lịch sử
+                carSale.SaleStatusId = dto.NewStatusId;
+                carSale.UpdatedAt = DateTime.UtcNow;
+
+                _context.SaleStatusHistory.Add(new SaleStatusHistory
+                {
+                    SaleId = carSale.SaleId,
+                    SaleStatusId = dto.NewStatusId,
+                    UserId = sellerId,
+                    Notes = $"Status updated by seller.", // Bạn có thể thêm ghi chú từ DTO nếu muốn
+                    Timestamp = DateTime.UtcNow
+                });
+
+                await _context.SaveChangesAsync();
+
+                // Hoàn tất transaction
+                await transaction.CommitAsync();
+
+                return Ok(new { message = "Order status updated successfully." });
+            }
+            catch (Exception ex)
+            {
+                await transaction.RollbackAsync();
+                Console.WriteLine($"Error in UpdateOrderStatus: {ex.Message}");
+                return StatusCode(500, new { message = $"Internal server error: {ex.Message}" });
+            }
+        }
+        public class UpdateOrderStatusDto
+        {
+            public int NewStatusId { get; set; }
+        }
+
+        [HttpDelete("posts/{id}")]
 
         public async Task<IActionResult> DeleteBlogPost(int id)
 

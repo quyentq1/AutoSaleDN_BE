@@ -13,6 +13,7 @@ using MailKit.Net.Smtp;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.AspNetCore.Authorization;
 using System.Globalization;
+using System.Text.Json;
 
 [Route("api/[controller]")]
 [ApiController]
@@ -1108,6 +1109,37 @@ public async Task<IActionResult> GetCars(
         return Ok(tags);
 
     }
+
+    [HttpGet("reviews")]
+    public async Task<IActionResult> GetAllReviews()
+    {
+        try
+        {
+            var reviews = await _context.Reviews
+                .Include(r => r.User) // nếu có navigation property tới User
+                .OrderByDescending(r => r.CreatedAt)
+                .ToListAsync();
+
+            var result = reviews.Select(r => new
+            {
+                SaleId = r.SaleId,
+                rating = r.Rating,
+                content = r.Content,
+                images = string.IsNullOrEmpty(r.Reply)
+                    ? new List<string>()
+                    : JsonSerializer.Deserialize<List<string>>(r.Reply) ?? new List<string>(),
+                createdAt = r.CreatedAt,
+                userName = r.User != null ? r.User.FullName : "Anonymous"
+            });
+
+            return Ok(result);
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(500, new { message = $"Internal server error: {ex.Message}" });
+        }
+    }
+
     [HttpGet("posts/slug/{slug}")]
     public async Task<IActionResult> GetBlogPostBySlug(string slug)
     {
@@ -1151,6 +1183,8 @@ public async Task<IActionResult> GetCars(
         {
             return StatusCode(500, new { message = "An error occurred while retrieving the blog post", error = ex.Message });
         }
+
+
     }
 
 

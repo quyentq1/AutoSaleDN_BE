@@ -6,6 +6,7 @@ using System.ComponentModel.DataAnnotations;
 using AutoSaleDN.Services;
 using System.Security.Claims;
 using Microsoft.IdentityModel.Tokens;
+using System.Text.Json;
 
 namespace AutoSaleDN.Controllers
 {
@@ -1077,16 +1078,75 @@ namespace AutoSaleDN.Controllers
             }
         }
 
-        [HttpPost("reviews")]
-        public async Task<IActionResult> AddReview([FromBody] Review model)
+        public class ReviewDto
+        {
+            public int CarSaleId { get; set; }
+            public int Rating { get; set; }
+            public string Content { get; set; }
+
+            public List<string> Images { get; set; } = new();
+        }
+
+        [HttpGet("reviews/{carSaleId}")]
+        public async Task<IActionResult> GetReview(int carSaleId)
         {
             try
             {
                 var userId = GetUserId();
-                model.UserId = userId;
-                model.CreatedAt = DateTime.UtcNow;
-                _context.Reviews.Add(model);
+
+                var review = await _context.Reviews
+                    .FirstOrDefaultAsync(r => r.SaleId == carSaleId && r.UserId == userId);
+
+                if (review == null)
+                    return Ok(new { exists = false });
+
+                var imgs = string.IsNullOrEmpty(review.Reply)
+                    ? new List<string>()
+                    : JsonSerializer.Deserialize<List<string>>(review.Reply) ?? new List<string>();
+
+                return Ok(new
+                {
+                    exists = true,
+                    id = review.ReviewId,
+                    saleId = review.SaleId,
+                    rating = review.Rating,
+                    content = review.Content,
+                    images = imgs,
+                    createdAt = review.CreatedAt
+                });
+            }
+            catch (UnauthorizedAccessException ex)
+            {
+                return Unauthorized(new { message = ex.Message });
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, new { message = $"Internal server error: {ex.Message}" });
+            }
+        }
+
+
+
+        [HttpPost("reviews")]
+        public async Task<IActionResult> AddReview([FromBody] ReviewDto model)
+        {
+            try
+            {
+                var userId = GetUserId();
+
+                var review = new Review
+                {
+                    UserId = userId,
+                    SaleId = model.CarSaleId,
+                    Rating = model.Rating,
+                    Content = model.Content,
+                    CreatedAt = DateTime.UtcNow,
+                    Reply = JsonSerializer.Serialize(model.Images ?? new List<string>())
+                };
+
+                _context.Reviews.Add(review);
                 await _context.SaveChangesAsync();
+
                 return Ok(new { message = "Review added successfully." });
             }
             catch (UnauthorizedAccessException ex)
@@ -1098,6 +1158,44 @@ namespace AutoSaleDN.Controllers
                 return StatusCode(500, new { message = $"Internal server error: {ex.Message}" });
             }
         }
+
+
+        [HttpPut("reviews/{id}")]
+        public async Task<IActionResult> UpdateReview(int id, [FromBody] ReviewDto model)
+        {
+            try
+            {
+                var userId = GetUserId();
+
+                var existingReview = await _context.Reviews
+                    .FirstOrDefaultAsync(r => r.ReviewId == id && r.UserId == userId);
+
+                if (existingReview == null)
+                {
+                    return NotFound(new { message = "Review not found or you don't have permission to edit it." });
+                }
+
+                // Cập nhật nội dung
+                existingReview.Rating = model.Rating;
+                existingReview.Content = model.Content;
+                existingReview.UpdatedAt = DateTime.UtcNow;
+                existingReview.Reply = JsonSerializer.Serialize(model.Images ?? new List<string>());
+
+                _context.Reviews.Update(existingReview);
+                await _context.SaveChangesAsync();
+
+                return Ok(new { message = "Review updated successfully." });
+            }
+            catch (UnauthorizedAccessException ex)
+            {
+                return Unauthorized(new { message = ex.Message });
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, new { message = $"Internal server error: {ex.Message}" });
+            }
+        }
+
 
         [HttpGet("blogs")]
         public async Task<IActionResult> GetBlogs()

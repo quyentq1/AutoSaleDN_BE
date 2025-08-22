@@ -5,18 +5,16 @@ namespace AutoSaleDN.Models
     {
         [Key]
         public int UserId { get; set; }
-        [Required, StringLength(50)]
-        public string Name { get; set; }
-        [Required, StringLength(255)]
-        public string Password { get; set; }
+        public string? Name { get; set; }
+        public string? Password { get; set; }
         [Required, StringLength(100)]
         public string Email { get; set; }
         [Required, StringLength(100)]
         public string FullName { get; set; }
         [StringLength(15)]
         public string? Mobile { get; set; }
-        [Required, StringLength(20)]
-        public string Role { get; set; }
+
+        public string? Role { get; set; }
         [Required, StringLength(100)]
         public string Province { get; set; }
         public bool Status { get; set; } = true;
@@ -27,12 +25,12 @@ namespace AutoSaleDN.Models
 
         public StoreLocation? StoreLocation { get; set; }
 
-        public ICollection<CarListing> CarListings { get; set; }
-        public ICollection<Payment> Payments { get; set; }
-        public ICollection<Report> Reports { get; set; }
-        public ICollection<Review> Reviews { get; set; }
-        public ICollection<BlogPost> BlogPosts { get; set; }
-        public ICollection<CarSale> CarSales { get; set; }
+        public ICollection<CarListing>? CarListings { get; set; }
+        public ICollection<Payment>? Payments { get; set; }
+        public ICollection<Report>? Reports { get; set; }
+        public ICollection<Review>? Reviews { get; set; }
+        public ICollection<BlogPost>? BlogPosts { get; set; }
+        public ICollection<CarSale>? CarSales { get; set; }
 
 
         public ICollection<DeliveryAddress>? DeliveryAddresses { get; set; }

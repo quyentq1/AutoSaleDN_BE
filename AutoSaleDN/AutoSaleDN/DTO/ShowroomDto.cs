@@ -16,7 +16,7 @@
         // Performance metrics
         public int SoldThisMonth { get; set; }
 
-        // Seller information
+        public int TotalSoldAllTime { get; set; }
         public SellersDto MainSeller { get; set; }
         public List<SellersDto> AllSellers { get; set; }
 
