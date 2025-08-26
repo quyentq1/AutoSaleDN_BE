@@ -300,47 +300,68 @@ namespace AutoSaleDN.Controllers
             return user;
         }
 
+        private IQueryable<Payment> GetBaseRevenueQuery(int showroomId)
+        {
+            return _context.Payments
+                .Where(p => p.PaymentStatus == "completed" &&
+                            p.PaymentForSale != null &&
+                            p.PaymentForSale.StoreListing.StoreLocationId == showroomId);
+        }
+
+        // --- CÁC API HIỆN TẠI ĐÃ ĐƯỢC LÀM GỌN ---
+
         [HttpGet("reports/revenue/daily")]
         public async Task<IActionResult> GetDailyRevenueReport(DateTime? date = null)
         {
             var showroomId = await GetSellerShowroomId();
-            if (showroomId == null)
-            {
-                return Unauthorized("Seller has no assigned showroom.");
-            }
+            if (showroomId == null) return Unauthorized("Seller has no assigned showroom.");
 
             var targetDate = date?.Date ?? DateTime.UtcNow.Date;
-            var sales = await _context.Payments
-                .Where(p => p.PaymentStatus == "completed")
+
+            var totalRevenue = await GetBaseRevenueQuery(showroomId.Value)
                 .Where(p => p.DateOfPayment.Date == targetDate)
-                .Where(p => p.PaymentForSale != null && p.PaymentForSale.StoreListing.StoreLocationId == showroomId)
                 .SumAsync(p => (decimal?)p.Amount) ?? 0;
 
-            return Ok(new { date = targetDate, totalRevenue = sales });
+            return Ok(new { date = targetDate, totalRevenue });
         }
 
-        // Lấy doanh thu hàng tháng của showroom seller
         [HttpGet("reports/revenue/monthly")]
         public async Task<IActionResult> GetMonthlyRevenueReport(int? year = null, int? month = null)
         {
             var showroomId = await GetSellerShowroomId();
-            if (showroomId == null)
-            {
-                return Unauthorized("Seller has no assigned showroom.");
-            }
+            if (showroomId == null) return Unauthorized("Seller has no assigned showroom.");
 
             var y = year ?? DateTime.UtcNow.Year;
             var m = month ?? DateTime.UtcNow.Month;
-            var sales = await _context.Payments
-                .Where(p => p.PaymentStatus == "completed")
+            var currentMonthStart = new DateTime(y, m, 1);
+            var prevMonthStart = currentMonthStart.AddMonths(-1);
+
+            var baseQuery = GetBaseRevenueQuery(showroomId.Value);
+
+            var currentMonthRevenue = await baseQuery
                 .Where(p => p.DateOfPayment.Year == y && p.DateOfPayment.Month == m)
-                .Where(p => p.PaymentForSale != null && p.PaymentForSale.StoreListing.StoreLocationId == showroomId)
                 .SumAsync(p => (decimal?)p.Amount) ?? 0;
 
-            return Ok(new { year = y, month = m, totalRevenue = sales });
+            // TÍNH TOÁN SO SÁNH: Lấy doanh thu tháng trước
+            var previousMonthRevenue = await baseQuery
+                .Where(p => p.DateOfPayment >= prevMonthStart && p.DateOfPayment < currentMonthStart)
+                .SumAsync(p => (decimal?)p.Amount) ?? 0;
+
+            // Tính tăng trưởng
+            decimal? growth = previousMonthRevenue > 0
+                ? Math.Round(((currentMonthRevenue - previousMonthRevenue) / previousMonthRevenue) * 100, 2)
+                : (currentMonthRevenue > 0 ? 100.0m : 0m);
+
+            return Ok(new
+            {
+                year = y,
+                month = m,
+                totalRevenue = currentMonthRevenue,
+                previousMonthRevenue, // Trả về thêm dữ liệu so sánh
+                growthPercentage = growth
+            });
         }
 
-        // Lấy doanh thu hàng năm của showroom seller
         [HttpGet("reports/revenue/yearly")]
         public async Task<IActionResult> GetYearlyRevenueReport(int? year = null)
         {
@@ -351,13 +372,50 @@ namespace AutoSaleDN.Controllers
             }
 
             var y = year ?? DateTime.UtcNow.Year;
-            var sales = await _context.Payments
-                .Where(p => p.PaymentStatus == "completed")
+
+            // Sử dụng lại hàm helper để code gọn hơn
+            var baseQuery = GetBaseRevenueQuery(showroomId.Value);
+
+            // Tính doanh thu năm hiện tại
+            var currentYearRevenue = await baseQuery
                 .Where(p => p.DateOfPayment.Year == y)
-                .Where(p => p.PaymentForSale != null && p.PaymentForSale.StoreListing.StoreLocationId == showroomId)
                 .SumAsync(p => (decimal?)p.Amount) ?? 0;
 
-            return Ok(new { year = y, totalRevenue = sales });
+            // TÍNH TOÁN SO SÁNH: Lấy doanh thu năm trước
+            var previousYearRevenue = await baseQuery
+                .Where(p => p.DateOfPayment.Year == y - 1)
+                .SumAsync(p => (decimal?)p.Amount) ?? 0;
+
+            // Tính tăng trưởng
+            decimal? growth = previousYearRevenue > 0
+                ? Math.Round(((currentYearRevenue - previousYearRevenue) / previousYearRevenue) * 100, 2)
+                : (currentYearRevenue > 0 ? 100.0m : 0m);
+
+            return Ok(new
+            {
+                year = y,
+                totalRevenue = currentYearRevenue,
+                previousYearRevenue, // Dữ liệu so sánh
+                yearGrowth = growth // Tỷ lệ tăng trưởng
+            });
+        }
+
+        // --- API MỚI ĐƯỢC BỔ SUNG ---
+
+        [HttpGet("reports/revenue/range")]
+        public async Task<IActionResult> GetRevenueReportByRange([FromQuery] DateTime startDate, [FromQuery] DateTime endDate)
+        {
+            var showroomId = await GetSellerShowroomId();
+            if (showroomId == null) return Unauthorized("Seller has no assigned showroom.");
+
+            // Đảm bảo endDate tính đến hết ngày
+            var inclusiveEndDate = endDate.Date.AddDays(1);
+
+            var totalRevenue = await GetBaseRevenueQuery(showroomId.Value)
+                .Where(p => p.DateOfPayment >= startDate.Date && p.DateOfPayment < inclusiveEndDate)
+                .SumAsync(p => (decimal?)p.Amount) ?? 0;
+
+            return Ok(new { startDate = startDate.Date, endDate = endDate.Date, totalRevenue });
         }
 
         // Lấy danh sách xe bán chạy nhất của showroom seller
@@ -370,55 +428,72 @@ namespace AutoSaleDN.Controllers
                 return Unauthorized("Seller has no assigned showroom.");
             }
 
-            var topCars = await _context.CarListings
-                .Include(cl => cl.Model)
-                .ThenInclude(m => m.CarManufacturer)
-                .Include(cl => cl.CarImages)
-                .Where(cl => cl.StoreListings.Any(sl => sl.StoreLocationId == showroomId))
-                .GroupBy(cl => new
+            // === BƯỚC 1: LẤY DỮ LIỆU BÁN HÀNG CỦA TOP XE ===
+            // Truy vấn này chỉ tập trung vào việc tính toán doanh số và doanh thu
+            var topCarsSalesData = await _context.CarSales
+                .Where(sale =>
+                    sale.StoreListing.StoreLocationId == showroomId &&
+                    sale.FullPayment != null &&
+                    sale.FullPayment.PaymentStatus == "completed"
+                )
+                .GroupBy(sale => new
                 {
-                    cl.ModelId,
-                    ModelName = cl.Model.Name,
-                    ManufacturerName = cl.Model.CarManufacturer.Name
+                    sale.StoreListing.CarListing.ModelId,
+                    ModelName = sale.StoreListing.CarListing.Model.Name,
+                    ManufacturerName = sale.StoreListing.CarListing.Model.CarManufacturer.Name,
+                    ImageUrl = sale.StoreListing.CarListing.CarImages.FirstOrDefault().Url
                 })
                 .Select(g => new TopSellingCarDto
                 {
                     ModelId = g.Key.ModelId,
                     ModelName = g.Key.ModelName,
                     ManufacturerName = g.Key.ManufacturerName,
-                    ImageUrl = g.FirstOrDefault().CarImages.FirstOrDefault().Url,
-                    // Cập nhật để tính TotalSold dựa trên các đơn hàng đã thanh toán hoàn tất
-                    TotalSold = _context.CarSales
-                        .Where(cs => cs.StoreListing.StoreLocationId == showroomId &&
-                                     cs.StoreListing.CarListing.ModelId == g.Key.ModelId)
-                        // Đếm các đơn hàng có ít nhất một khoản thanh toán full_payment hoặc remaining_payment đã hoàn tất
-                        .Count(cs => cs.FullPayment != null && cs.FullPayment.PaymentStatus == "completed" ||
-                                     cs.DepositPayment != null && cs.DepositPayment.PaymentStatus == "completed" && cs.RemainingBalance == 0),
-                    // Cập nhật để tính Revenue từ các khoản thanh toán đã hoàn tất
-                    Revenue = _context.Payments
-                        .Where(p => (p.PaymentPurpose == "full_payment" || p.PaymentPurpose == "remaining_payment") &&
-                                     p.PaymentStatus == "completed")
-                        .Where(p => p.PaymentForSale != null &&
-                                     p.PaymentForSale.StoreListing.StoreLocationId == showroomId &&
-                                     p.PaymentForSale.StoreListing.CarListing.ModelId == g.Key.ModelId)
-                        .Sum(p => (decimal?)p.Amount) ?? 0,
-                    AverageRating = _context.Reviews
-                        .Where(r => r.Listing.StoreListings.Any(sl => sl.StoreLocationId == showroomId) &&
-                                    r.Listing.ModelId == g.Key.ModelId)
-                        .Any() ? (int)_context.Reviews
-                        .Where(r => r.Listing.StoreListings.Any(sl => sl.StoreLocationId == showroomId) &&
-                                    r.Listing.ModelId == g.Key.ModelId)
-                        .Average(r => r.Rating) : 0,
-                    TotalReviews = _context.Reviews
-                        .Where(r => r.Listing.StoreListings.Any(sl => sl.StoreLocationId == showroomId) &&
-                                    r.Listing.ModelId == g.Key.ModelId)
-                        .Count()
+                    ImageUrl = g.Key.ImageUrl,
+                    TotalSold = g.Count(),
+                    Revenue = g.Sum(sale =>
+                        (sale.DepositPayment != null && sale.DepositPayment.PaymentStatus == "completed" ? (decimal?)sale.DepositPayment.Amount : 0m) +
+                        (sale.FullPayment != null && sale.FullPayment.PaymentStatus == "completed" ? (decimal?)sale.FullPayment.Amount : 0m)
+                    ) ?? 0m
                 })
-                .OrderByDescending(c => c.Revenue)
+                .OrderByDescending(c => c.TotalSold)
+                .ThenByDescending(c => c.Revenue)
                 .Take(10)
                 .ToListAsync();
 
-            return Ok(topCars);
+            if (!topCarsSalesData.Any())
+            {
+                return Ok(new List<TopSellingCarDto>());
+            }
+
+            // === BƯỚC 2: LẤY DỮ LIỆU REVIEW CHO TOP XE ĐÓ ===
+            // Lấy danh sách ID của các model đã lọt vào top
+            var topModelIds = topCarsSalesData.Select(c => c.ModelId).ToList();
+
+            // Chạy một truy vấn duy nhất để lấy tất cả review stats cho các model này
+            var reviewStats = await _context.Reviews
+                .Where(r => r.ListingId.HasValue && topModelIds.Contains(r.Listing.ModelId))
+                .GroupBy(r => r.Listing.ModelId)
+                .Select(g => new
+                {
+                    ModelId = g.Key,
+                    TotalReviews = g.Count(),
+                    AverageRating = g.Average(r => r.Rating)
+                })
+                .ToDictionaryAsync(x => x.ModelId);
+
+            // === BƯỚC 3: GỘP KẾT QUẢ LẠI ===
+            // Gán thông tin review vào danh sách top xe (thao tác này cực nhanh vì thực hiện trong bộ nhớ)
+            foreach (var car in topCarsSalesData)
+            {
+                if (reviewStats.ContainsKey(car.ModelId))
+                {
+                    var stats = reviewStats[car.ModelId];
+                    car.TotalReviews = stats.TotalReviews;
+                    car.AverageRating = (int)Math.Round(stats.AverageRating);
+                }
+            }
+
+            return Ok(topCarsSalesData);
         }
 
         [HttpGet("cars-in-showroom")]
@@ -491,6 +566,33 @@ namespace AutoSaleDN.Controllers
             return Ok(inventory);
         }
 
+        [HttpGet("my-showroom-profile")]
+        public async Task<IActionResult> GetMyShowroomProfile()
+        {
+            var showroomId = await GetSellerShowroomId();
+            if (showroomId == null)
+            {
+                return Unauthorized("Seller has no assigned showroom.");
+            }
+
+            // Truy vấn CSDL để lấy tên và địa chỉ của showroom
+            var showroomProfile = await _context.StoreLocations
+                .Where(sl => sl.StoreLocationId == showroomId)
+                .Select(sl => new
+                {
+                    sl.Name,
+                    sl.Address
+                })
+                .FirstOrDefaultAsync();
+
+            if (showroomProfile == null)
+            {
+                return NotFound("Showroom not found.");
+            }
+
+            return Ok(showroomProfile);
+        }
+
         [HttpGet("reports/my-showroom-inventory")]
         public async Task<ActionResult<ShowroomInventoryDto>> GetMyShowroomInventory()
         {
@@ -500,61 +602,11 @@ namespace AutoSaleDN.Controllers
                 return Unauthorized("Seller has no assigned showroom.");
             }
 
-            var showroom = await _context.StoreLocations
-                .FirstOrDefaultAsync(sl => sl.StoreLocationId == showroomId);
-            if (showroom == null)
-            {
-                return NotFound("Showroom not found.");
-            }
+            // Truy vấn cực kỳ đơn giản và hiệu quả để lấy tổng số xe
+            var totalCars = await _context.StoreListings
+                .CountAsync(listing => listing.StoreLocationId == showroomId && !listing.IsCurrent);
 
-            var listings = await _context.StoreListings
-                .Include(sl => sl.CarListing)
-                    .ThenInclude(cl => cl.Model)
-                        .ThenInclude(m => m.CarManufacturer)
-                .Include(sl => sl.CarListing)
-                    .ThenInclude(cl => cl.CarImages)
-                .Where(sl => sl.StoreLocationId == showroomId && sl.Status == "IN_STOCK")
-                .ToListAsync();
-
-            var totalCars = listings.Sum(sl => sl.AvailableQuantity);
-
-            var brands = listings
-                .GroupBy(sl => sl.CarListing.Model.CarManufacturer.Name)
-                .Select(g => new CarBrandStatsDto
-                {
-                    BrandName = g.Key,
-                    TotalCars = g.Sum(sl => sl.AvailableQuantity)
-                })
-                .ToList();
-
-            var models = listings
-                .Select(sl => new
-                {
-                    ModelName = sl.CarListing.Model.Name,
-                    ManufacturerName = sl.CarListing.Model.CarManufacturer.Name,
-                    CurrentQuantity = sl.CurrentQuantity,
-                    AvailableQuantity = sl.AvailableQuantity,
-                    ImageUrl = sl.CarListing.CarImages.FirstOrDefault().Url
-                })
-                .GroupBy(m => new { m.ModelName, m.ManufacturerName })
-                .Select(g => new CarModelStatsDto
-                {
-                    ModelName = g.Key.ModelName,
-                    ManufacturerName = g.Key.ManufacturerName,
-                    CurrentQuantity = g.Sum(m => m.CurrentQuantity),
-                    AvailableQuantity = g.Sum(m => m.AvailableQuantity),
-                })
-                .ToList();
-
-            var inventory = new ShowroomDetailsDto
-            {
-                TotalCars = totalCars,
-                AvailableCars = totalCars,
-                Brands = brands,
-                Models = models
-            };
-
-            return Ok(inventory);
+            return Ok(new { totalCars = totalCars });
         }
 
         // 7. Xem, trả lời đánh giá
@@ -1292,6 +1344,188 @@ namespace AutoSaleDN.Controllers
             return Ok(categories);
 
         }
+        [HttpGet("test-drives")]
+        public async Task<IActionResult> GetBookingsForSeller()
+        {
+            var sellerId = GetUserId();
+            if (sellerId == null)
+            {
+                return Unauthorized("Seller is not authenticated.");
+            }
+
+            // Lấy danh sách các StoreLocationId mà seller này quản lý
+            var managedStoreLocationIds = await _context.StoreLocations
+                .Where(sl => sl.Users.Any(u => u.UserId == sellerId))
+                .Select(sl => sl.StoreLocationId)
+                .ToListAsync();
+
+            if (!managedStoreLocationIds.Any())
+            {
+                return Ok(new List<object>()); // Trả về danh sách rỗng nếu seller không quản lý showroom nào
+            }
+
+            // Lấy tất cả các lịch hẹn thuộc các showroom mà seller quản lý
+            var bookings = await _context.TestDriveBookings
+                .Include(b => b.User) // Thông tin khách hàng đặt lịch
+                .Include(b => b.StoreListing)
+                    .ThenInclude(sl => sl.StoreLocation)
+                .Include(b => b.StoreListing)
+                    .ThenInclude(sl => sl.CarListing)
+                        .ThenInclude(cl => cl.Model)
+                            .ThenInclude(m => m.CarManufacturer)
+                .Where(b => managedStoreLocationIds.Contains(b.StoreListing.StoreLocationId))
+                .OrderByDescending(b => b.BookingDate)
+                .Select(b => new
+                {
+                    // Thông tin lịch hẹn
+                    b.BookingId,
+                    b.BookingDate,
+                    b.Status,
+                    b.Notes,
+                    b.HasLicense,
+
+                    // Thông tin khách hàng
+                    Customer = new
+                    {
+                        b.User.UserId,
+                        b.User.FullName,
+                        b.User.Email,
+                        b.User.Mobile
+                    },
+
+                    // Thông tin xe
+                    Car = new
+                    {
+                        b.StoreListing.CarListing.ListingId,
+                        ManufacturerName = b.StoreListing.CarListing.Model.CarManufacturer.Name,
+                        ModelName = b.StoreListing.CarListing.Model.Name,
+                        b.StoreListing.CarListing.Year
+                    },
+
+                    // Thông tin showroom
+                    Showroom = new
+                    {
+                        ShowroomName = b.StoreListing.StoreLocation.Name,
+                        b.StoreListing.StoreLocation.Address
+                    }
+                })
+                .ToListAsync();
+
+            return Ok(bookings);
+        }
+
+        // === API 2: LẤY CHI TIẾT MỘT LỊCH HẸN ===
+        [HttpGet("test-drives/{id}")]
+        public async Task<IActionResult> GetBookingDetailForSeller(int id)
+        {
+            var sellerId = GetUserId();
+            if (sellerId == null)
+            {
+                return Unauthorized("Seller is not authenticated.");
+            }
+
+            var booking = await _context.TestDriveBookings
+                .Include(b => b.User)
+                .Include(b => b.StoreListing)
+                    .ThenInclude(sl => sl.StoreLocation)
+                        .ThenInclude(loc => loc.Users)
+                .Include(b => b.StoreListing)
+                    .ThenInclude(sl => sl.CarListing)
+                        .ThenInclude(cl => cl.Model)
+                            .ThenInclude(m => m.CarManufacturer)
+                .FirstOrDefaultAsync(b => b.BookingId == id);
+
+            if (booking == null)
+            {
+                return NotFound("Booking not found.");
+            }
+
+            // === KIỂM TRA QUYỀN: Đảm bảo seller này có quyền xem lịch hẹn này ===
+            bool isAuthorized = booking.StoreListing.StoreLocation.Users.Any(u => u.UserId == sellerId);
+            if (!isAuthorized)
+            {
+                return Forbid("You do not have permission to view this booking.");
+            }
+
+            var bookingDetail = new
+            {
+                booking.BookingId,
+                booking.BookingDate,
+                booking.Status,
+                booking.Notes,
+                booking.HasLicense,
+                Customer = new { booking.User.UserId, booking.User.FullName, booking.User.Email, booking.User.Mobile },
+                Car = new
+                {
+                    booking.StoreListing.CarListing.ListingId,
+                    ManufacturerName = booking.StoreListing.CarListing.Model.CarManufacturer.Name,
+                    ModelName = booking.StoreListing.CarListing.Model.Name,
+                    booking.StoreListing.CarListing.Year,
+                    booking.StoreListing.CarListing.Price,
+                    booking.StoreListing.CarListing.Mileage,
+                    booking.StoreListing.CarListing.Condition,
+                },
+                Showroom = new
+                {
+                    ShowroomName = booking.StoreListing.StoreLocation.Name,
+                    booking.StoreListing.StoreLocation.Address
+                }
+            };
+
+            return Ok(bookingDetail);
+        }
+
+        // === API 3: CẬP NHẬT TRẠNG THÁI LỊCH HẸN ===
+        [HttpPut("test-drives/{id}/status")]
+        public async Task<IActionResult> UpdateBookingStatus(int id, [FromBody] UpdateBookingStatusDto statusDto)
+        {
+            if (!ModelState.IsValid)
+            {
+                return BadRequest(ModelState);
+            }
+
+            var sellerId = GetUserId();
+            if (sellerId == null)
+            {
+                return Unauthorized("Seller is not authenticated.");
+            }
+
+            // Các trạng thái hợp lệ mà seller có thể cập nhật
+            var allowedStatuses = new[] { "Confirmed", "Completed", "Canceled" };
+            if (!allowedStatuses.Contains(statusDto.Status))
+            {
+                return BadRequest("Invalid status value.");
+            }
+
+            var booking = await _context.TestDriveBookings
+                .Include(b => b.StoreListing)
+                    .ThenInclude(sl => sl.StoreLocation)
+                        .ThenInclude(loc => loc.Users)
+                .FirstOrDefaultAsync(b => b.BookingId == id);
+
+            if (booking == null)
+            {
+                return NotFound("Booking not found.");
+            }
+
+            // KIỂM TRA QUYỀN
+            bool isAuthorized = booking.StoreListing.StoreLocation.Users.Any(u => u.UserId == sellerId);
+            if (!isAuthorized)
+            {
+                return Forbid("You do not have permission to update this booking.");
+            }
+
+            // Cập nhật trạng thái và lưu vào DB
+            booking.Status = statusDto.Status;
+            await _context.SaveChangesAsync();
+
+            return Ok(new { message = $"Booking status successfully updated to '{statusDto.Status}'." });
+        }
+        public class UpdateBookingStatusDto
+        {
+            [Required]
+            public string Status { get; set; }
+        }
 
         [HttpGet("posts/tags")]
 
@@ -1324,6 +1558,7 @@ namespace AutoSaleDN.Controllers
         }
 
     }
+
 
 }
 public class BlogPostCreateModel

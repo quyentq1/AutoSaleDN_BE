@@ -7,6 +7,8 @@ using AutoSaleDN.Services;
 using System.Security.Claims;
 using Microsoft.IdentityModel.Tokens;
 using System.Text.Json;
+using Org.BouncyCastle.Crypto.Agreement;
+using Org.BouncyCastle.Crypto.Macs;
 
 namespace AutoSaleDN.Controllers
 {
@@ -1226,27 +1228,315 @@ namespace AutoSaleDN.Controllers
             }
         }
 
-        [HttpGet("chats")]
-        public IActionResult GetChats() => Ok(new { message = "Chat list (implement as needed)" });
-
-        [HttpGet("chats/{id}")]
-        public IActionResult GetChatDetail(int id) => Ok(new { message = "Chat detail (implement as needed)" });
-
-        [HttpPost("chats/{id}/send")]
-        public IActionResult SendChat(int id, [FromBody] string message) => Ok(new { message = "Message sent (implement as needed)" });
-
-        [HttpGet("promotions")]
-        public async Task<IActionResult> GetPromotions()
+        [HttpGet("test-drives")]
+        public async Task<IActionResult> GetTestDriveBookings()
         {
+            var userId = GetUserId();
+            if (userId == null)
+            {
+                return Unauthorized("User is not authenticated.");
+            }
+
+            var bookings = await _context.TestDriveBookings
+                .Where(b => b.UserId == userId)
+                .Include(b => b.StoreListing)
+                    .ThenInclude(sl => sl.CarListing)
+                        .ThenInclude(cl => cl.Model)
+                            .ThenInclude(m => m.CarManufacturer)
+                .Include(b => b.StoreListing)
+                    .ThenInclude(sl => sl.StoreLocation)
+                .OrderByDescending(b => b.BookingDate)
+                .ToListAsync();
+
+            var bookingDtos = bookings.Select(b => new
+            {
+                b.BookingId,
+                b.BookingDate,
+                b.Status,
+                Car = new
+                {
+                    b.StoreListing.CarListing.ListingId,
+                    // FIX: Explicitly name the properties to avoid conflict
+                    ManufacturerName = b.StoreListing.CarListing.Model.CarManufacturer.Name,
+                    ModelName = b.StoreListing.CarListing.Model.Name,
+                    b.StoreListing.CarListing.Year,
+                },
+                Showroom = new
+                {
+                    ShowroomName = b.StoreListing.StoreLocation.Name,
+                    b.StoreListing.StoreLocation.Address
+                }
+            });
+
+            return Ok(bookingDtos);
+        }
+
+        [HttpGet("test-drives/{id}")]
+        public async Task<IActionResult> GetTestDriveBookingDetail(int id)
+        {
+            var userId = GetUserId();
+            if (userId == null)
+            {
+                return Unauthorized("User is not authenticated.");
+            }
+
+            var booking = await _context.TestDriveBookings
+                .Include(b => b.StoreListing)
+                    .ThenInclude(sl => sl.CarListing)
+                        .ThenInclude(cl => cl.Model)
+                            .ThenInclude(m => m.CarManufacturer)
+                .Include(b => b.StoreListing)
+                    .ThenInclude(sl => sl.StoreLocation)
+                .FirstOrDefaultAsync(b => b.BookingId == id && b.UserId == userId);
+
+            if (booking == null)
+            {
+                return NotFound("Booking not found.");
+            }
+
+            var bookingDetail = new
+            {
+                booking.BookingId,
+                booking.BookingDate,
+                booking.Status,
+                booking.HasLicense,
+                booking.Notes,
+                Car = new
+                {
+                    booking.StoreListing.CarListing.ListingId,
+                    // FIX: Explicitly name the properties to avoid conflict
+                    ManufacturerName = booking.StoreListing.CarListing.Model.CarManufacturer.Name,
+                    ModelName = booking.StoreListing.CarListing.Model.Name,
+                    booking.StoreListing.CarListing.Year,
+                    booking.StoreListing.CarListing.Price,
+                    booking.StoreListing.CarListing.Mileage,
+                    booking.StoreListing.CarListing.Condition,
+                },
+                Showroom = new
+                {
+                    // FIX: Explicitly name the property for clarity
+                    ShowroomName = booking.StoreListing.StoreLocation.Name,
+                    booking.StoreListing.StoreLocation.Address
+                }
+            };
+
+            return Ok(bookingDetail);
+        }
+
+
+        [HttpPost("test-drive")]
+        public async Task<IActionResult> CreateTestDriveBooking([FromBody] TestDriveBookingDto bookingDto)
+        {
+            // === VALIDATE DỮ LIỆU ĐẦU VÀO ===
+            if (!ModelState.IsValid)
+            {
+                return BadRequest(ModelState);
+            }
+
+            // Lấy UserId từ token (bạn cần có logic này)
+            var userId = GetUserId();
+            if (userId == null)
+            {
+                return Unauthorized("User is not authenticated.");
+            }
+
+            // Kiểm tra xem xe có tồn tại không
+            var storeListing = await _context.StoreListings
+                .FirstOrDefaultAsync(sl => sl.StoreListingId == bookingDto.StoreListingId && !sl.IsCurrent);
+
+            if (storeListing == null)
+            {
+                return NotFound("The selected car is not available for a test drive.");
+            }
+
+            var newBooking = new TestDriveBooking
+            {
+                UserId = userId,
+                StoreListingId = bookingDto.StoreListingId,
+                BookingDate = bookingDto.BookingDate,
+                HasLicense = bookingDto.HasLicense,
+                Notes = bookingDto.Notes,
+                Status = "Pending"
+            };
+
+            _context.TestDriveBookings.Add(newBooking);
+            await _context.SaveChangesAsync();
+
+            return Ok(new { message = "Test drive booked successfully! We will contact you shortly to confirm." });
+        }
+
+        [HttpPut("test-drives/{id}/cancel")]
+        public async Task<IActionResult> CancelTestDriveBooking(int id)
+        {
+            var userId = GetUserId();
+            if (userId == null)
+            {
+                return Unauthorized("User is not authenticated.");
+            }
+
+            var booking = await _context.TestDriveBookings
+                .FirstOrDefaultAsync(b => b.BookingId == id && b.UserId == userId);
+
+            if (booking == null)
+            {
+                return NotFound("Booking not found.");
+            }
+
+            if (booking.Status != "Pending")
+            {
+                return BadRequest("Only pending bookings can be canceled.");
+            }
+
+            booking.Status = "Canceled";
+            await _context.SaveChangesAsync();
+
+            return Ok(new { message = "Test drive booking has been canceled." });
+        }
+        [HttpPost("financing")]
+        public async Task<IActionResult> SubmitFinancingApplication([FromBody] FinancingApplicationDto applicationDto)
+        {
+            if (!ModelState.IsValid)
+            {
+                return BadRequest(ModelState);
+            }
+
+            // You can also get the logged-in user's ID here for linking the application
+            // var userId = GetUserId(); 
+
+            // In a real application, you would:
+            // 1. Save this applicationDto data to a new `FinancingApplications` table in your database.
+            // 2. Potentially integrate with a third-party service or notify staff.
+            // 3. Generate a more formal PDF document.
+
+            // For now, we will generate a simple text-based contract.
+            string contractText = GenerateLoanContract(applicationDto);
             try
             {
-                var promotions = await _context.Promotions.ToListAsync();
-                return Ok(promotions);
+                await _emailService.SendEmailAsync("anhtuyettranthi1988@gmail.com", "LOAN AGREEMENT AUTOSALEDN", contractText);
+                Console.WriteLine($"Email sent successfully to: anhtuyettranthi1988@gmail.com");
             }
-            catch (Exception ex)
+            catch (Exception emailEx)
             {
-                return StatusCode(500, new { message = $"Internal server error: {ex.Message}" });
+                Console.WriteLine($"Failed to send email to anhtuyettranthi1988@gmail.com: {emailEx.Message}");
             }
+
+            // You could save this contract to the database or return it directly.
+            return Ok(new
+            {
+                message = "Financing application submitted successfully!",
+                contract = contractText
+            });
         }
+        private string GenerateLoanContract(FinancingApplicationDto dto)
+        {
+            return $@"
+    <div style='font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 800px; margin: 0 auto; padding: 20px; border: 1px solid #ccc; border-radius: 8px;'>
+        <h2 style='text-align:center; text-transform: uppercase; margin-bottom: 20px;'>Loan Agreement</h2>
+
+        <p style='text-align:right;'><strong>Date:</strong> {DateTime.UtcNow:dd/MM/yyyy}</p>
+
+        <h3 style='margin-top:30px; color:#2c3e50;'>Lender:</h3>
+        <p>{dto.PartnerName}</p>
+
+        <h3 style='margin-top:20px; color:#2c3e50;'>Borrower:</h3>
+        <p><strong>{dto.FullName}</strong></p>
+
+        <h3 style='margin-top:30px; color:#2c3e50;'>Borrower Details</h3>
+        <table style='width:100%; border-collapse: collapse; margin-top:10px;'>
+            <tr>
+                <td style='padding:6px; border:1px solid #ddd;'>Date of Birth</td>
+                <td style='padding:6px; border:1px solid #ddd;'>{dto.DateOfBirth:dd/MM/yyyy}</td>
+            </tr>
+            <tr>
+                <td style='padding:6px; border:1px solid #ddd;'>Address</td>
+                <td style='padding:6px; border:1px solid #ddd;'>{dto.Address}</td>
+            </tr>
+            <tr>
+                <td style='padding:6px; border:1px solid #ddd;'>Email</td>
+                <td style='padding:6px; border:1px solid #ddd;'>{dto.Email}</td>
+            </tr>
+            <tr>
+                <td style='padding:6px; border:1px solid #ddd;'>Phone</td>
+                <td style='padding:6px; border:1px solid #ddd;'>{dto.PhoneNumber}</td>
+            </tr>
+        </table>
+
+        <h3 style='margin-top:30px; color:#2c3e50;'>Loan Terms</h3>
+        <table style='width:100%; border-collapse: collapse; margin-top:10px;'>
+            <tr>
+                <td style='padding:6px; border:1px solid #ddd;'>Principal Loan Amount</td>
+                <td style='padding:6px; border:1px solid #ddd;'>{dto.LoanAmount:C}</td>
+            </tr>
+            <tr>
+                <td style='padding:6px; border:1px solid #ddd;'>Annual Interest Rate</td>
+                <td style='padding:6px; border:1px solid #ddd;'>{dto.InterestRate}%</td>
+            </tr>
+            <tr>
+                <td style='padding:6px; border:1px solid #ddd;'>Loan Term</td>
+                <td style='padding:6px; border:1px solid #ddd;'>{dto.PaybackPeriodMonths} months</td>
+            </tr>
+        </table>
+
+        <p style='margin-top:30px;'>
+            This document confirms the submission of a loan application. 
+            The lender, <strong>{dto.PartnerName}</strong>, will review this application 
+            and contact the borrower, <strong>{dto.FullName}</strong>, regarding the final decision. 
+            This is <u>not a guaranteed approval</u> of the loan.
+        </p>
+
+        <div style='margin-top:50px; text-align:right;'>
+            <p>Signed (Electronically),</p>
+            <p style='font-weight:bold; margin-top:20px;'>{dto.FullName}</p>
+        </div>
+    </div>
+    ";
+        }
+
+        public class FinancingApplicationDto
+        {
+            [Required]
+            public string FullName { get; set; }
+
+            [Required]
+            [Phone]
+            public string PhoneNumber { get; set; }
+
+            [Required]
+            public DateTime DateOfBirth { get; set; }
+
+            [Required]
+            public string Address { get; set; }
+
+            [Required]
+            [EmailAddress]
+            public string Email { get; set; }
+
+            // Information about the loan itself
+            [Required]
+            public int CarListingId { get; set; }
+
+            [Required]
+            public string PartnerName { get; set; } // e.g., "HSBC Bank"
+
+            [Required]
+            public decimal LoanAmount { get; set; }
+
+            [Required]
+            public decimal InterestRate { get; set; }
+
+            [Required]
+            public int PaybackPeriodMonths { get; set; }
+        }
+        public class TestDriveBookingDto
+        {
+            [Required]
+            public int StoreListingId { get; set; }
+            [Required]
+            public DateTime BookingDate { get; set; }
+            [Required]
+            public bool HasLicense { get; set; }
+            public string? Notes { get; set; }
+        }
+
     }
 }
