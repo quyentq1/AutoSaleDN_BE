@@ -791,65 +791,56 @@ namespace AutoSaleDN.Controllers
         }
 
         [HttpGet("orders")]
-        public async Task<IActionResult> GetMyOrders([FromQuery] int? statusId = null)
+        public async Task<IActionResult> GetMyOrders(
+    [FromQuery] int? statusId = null,
+    [FromQuery] int pageNumber = 1,
+    [FromQuery] int pageSize = 10) // Thêm phân trang
         {
             try
             {
-                // IMPORTANT: Implement GetUserId() properly based on your authentication setup.
-                // This usually involves reading claims from HttpContext.User.
-                var userId = GetUserId(); // Assuming this method correctly gets the current authenticated UserId
-
+                var userId = GetUserId();
                 if (userId == 0)
                 {
                     return Unauthorized(new { message = "User not authenticated or user ID is invalid." });
                 }
 
-                var query = _context.CarSales
-                    .Where(s => s.CustomerId == userId);
+                // Bắt đầu câu truy vấn, AsNoTracking() giúp tăng hiệu năng cho các truy vấn chỉ đọc
+                var query = _context.CarSales.AsNoTracking();
 
-                query = query
-                    .Include(cs => cs.SaleStatus)
-                    .Include(cs => cs.StoreListing)
-                        .ThenInclude(sl => sl.CarListing)
-                            .ThenInclude(cl => cl.Model)
-                                .ThenInclude(cm => cm.CarManufacturer)
-                    .Include(cs => cs.StoreListing)
-                        .ThenInclude(sl => sl.CarListing)
-                            .ThenInclude(cl => cl.CarImages)
-                    .Include(cs => cs.StoreListing)
-                        .ThenInclude(sl => sl.CarListing)
-                            .ThenInclude(cl => cl.Specifications)
-                    .Include(cs => cs.StoreListing)
-                        .ThenInclude(sl => sl.StoreLocation)
-                            .ThenInclude(loc => loc.Users)
-                    .Include(cs => cs.ShippingAddress)
-                    .Include(cs => cs.PickupStoreLocation)
-                        .ThenInclude(loc => loc.Users)
-                    .Include(cs => cs.DepositPayment)
-                    .Include(cs => cs.FullPayment);
+                // Lọc theo CustomerId (luôn cần)
+                query = query.Where(s => s.CustomerId == userId);
 
+                // Lọc theo statusId nếu có
                 if (statusId.HasValue)
                 {
                     query = query.Where(s => s.SaleStatusId == statusId.Value);
                 }
 
+                // Lấy tổng số lượng đơn hàng trước khi phân trang để trả về cho client
+                var totalItems = await query.CountAsync();
+
                 var orders = await query
                     .OrderByDescending(cs => cs.CreatedAt)
-                    .Select(cs => new
+                    .Skip((pageNumber - 1) * pageSize) // Bỏ qua các trang trước
+                    .Take(pageSize) // Lấy số lượng item cho trang hiện tại
+                    .Select(cs => new // Định hình dữ liệu (projection) để chỉ lấy các cột cần thiết
                     {
                         // Basic Order Details
-                        OrderId = cs.SaleId, // Renamed to OrderId for clarity as per frontend
+                        OrderId = cs.SaleId,
                         cs.OrderNumber,
                         cs.FinalPrice,
                         cs.DepositAmount,
                         cs.RemainingBalance,
-                        OrderDate = cs.CreatedAt, // Use CreatedAt as OrderDate
+                        OrderDate = cs.CreatedAt,
                         cs.DeliveryOption,
                         cs.ExpectedDeliveryDate,
                         cs.ActualDeliveryDate,
                         cs.OrderType,
 
-                        // Car Details - Nested Object
+                        // Sale Status
+                        CurrentSaleStatus = cs.SaleStatus.StatusName, // Lấy trực tiếp, không cần logic phức tạp
+
+                        // Car Details
                         CarDetails = cs.StoreListing.CarListing != null ? new
                         {
                             ListingId = cs.StoreListing.CarListing.ListingId,
@@ -858,86 +849,46 @@ namespace AutoSaleDN.Controllers
                             Year = cs.StoreListing.CarListing.Year,
                             Mileage = cs.StoreListing.CarListing.Mileage,
                             Condition = cs.StoreListing.CarListing.Condition,
-                            Engine = cs.StoreListing.CarListing.Specifications != null && cs.StoreListing.CarListing.Specifications.Any() ? cs.StoreListing.CarListing.Specifications.FirstOrDefault().Engine : null,
-                            Transmission = cs.StoreListing.CarListing.Specifications != null && cs.StoreListing.CarListing.Specifications.Any() ? cs.StoreListing.CarListing.Specifications.FirstOrDefault().Transmission : null,
-                            FuelType = cs.StoreListing.CarListing.Specifications != null && cs.StoreListing.CarListing.Specifications.Any() ? cs.StoreListing.CarListing.Specifications.FirstOrDefault().FuelType : null,
-                            ImageUrl = cs.StoreListing.CarListing.CarImages.FirstOrDefault().Url // Assuming CarImages is a collection
+                            // Lấy thông số kỹ thuật hiệu quả hơn
+                            Engine = cs.StoreListing.CarListing.Specifications.Select(spec => spec.Engine).FirstOrDefault(),
+                            Transmission = cs.StoreListing.CarListing.Specifications.Select(spec => spec.Transmission).FirstOrDefault(),
+                            FuelType = cs.StoreListing.CarListing.Specifications.Select(spec => spec.FuelType).FirstOrDefault(),
+                            ImageUrl = cs.StoreListing.CarListing.CarImages.Select(img => img.Url).FirstOrDefault()
                         } : null,
 
-                        // Sale Status Display Logic (matching frontend)
-                        CurrentSaleStatus = (cs.SaleStatus != null) ?
-                            (cs.SaleStatus.StatusName == "Available" || cs.SaleStatus.StatusName == "Pending Deposit" ? "Available" : // Pending Deposit -> Available
-                             cs.SaleStatus.StatusName == "Sold" ? "Sold" :
-                             cs.SaleStatus.StatusName == "On Hold" ? "On Hold" :
-                             cs.SaleStatus.StatusName == "Deposit Paid" || cs.SaleStatus.StatusName == "Pending Full Payment" ? "Deposit Paid" : // Pending Full Payment -> Deposit Paid
-                             cs.SaleStatus.StatusName == "Payment Complete" ? "Sold" : // Payment Complete -> Sold
-                             cs.SaleStatus.StatusName) // Default to original status if not mapped
-                             : "Available", // Default if no status
-
-                        // Payment Details - Nested Objects
-
+                        // Seller Details
                         SellerDetails = cs.StoreListing.StoreLocation != null ? new
                         {
-
-                            // Seller/Manager Information (assuming there's a manager/owner for each store)
                             SellerInfo = cs.StoreListing.StoreLocation.Users
-                        .Where(u => u.StoreLocationId == cs.StoreListing.StoreLocation.StoreLocationId)
-                        .Select(u => new
-                        {
-                            UserId = u.UserId,
-                            FullName = u.FullName,
-                            Email = u.Email,
-                            PhoneNumber = u.Mobile,
-                            Role = u.Role
-                        }).FirstOrDefault()
-                        } : null,
-                        DepositPaymentDetails = cs.DepositPayment != null ? new
-                        {
-                            cs.DepositPayment.PaymentId,
-                            cs.DepositPayment.Amount,
-                            cs.DepositPayment.PaymentMethod,
-                            PaymentStatus = cs.DepositPayment.PaymentStatus, // Corrected field name
-                            DateOfPayment = cs.DepositPayment.DateOfPayment // Corrected field name
-                        } : null,
-                        FullPaymentDetails = cs.FullPayment != null ? new
-                        {
-                            cs.FullPayment.PaymentId,
-                            cs.FullPayment.Amount,
-                            cs.FullPayment.PaymentMethod,
-                            PaymentStatus = cs.FullPayment.PaymentStatus, // Corrected field name
-                            DateOfPayment = cs.FullPayment.DateOfPayment // Corrected field name
+                                .Select(u => new
+                                {
+                                    u.UserId,
+                                    u.FullName,
+                                    u.Email,
+                                    PhoneNumber = u.Mobile
+                                }).FirstOrDefault()
                         } : null,
 
-                        // Delivery/Pickup Details - Nested Objects
-                        ShippingAddressDetails = cs.ShippingAddress != null ? new
-                        {
-                            cs.ShippingAddress.AddressId,
-                            cs.ShippingAddress.RecipientName,
-                            cs.ShippingAddress.Address,
-                        } : null,
-                        PickupLocationDetails = cs.PickupStoreLocation != null ? new
-                        {
-                            cs.PickupStoreLocation.StoreLocationId,
-                            cs.PickupStoreLocation.Name,
-                            cs.PickupStoreLocation.Address,
-                        } : null,
+                        // Không cần lấy chi tiết payment/address ở danh sách, chỉ cần ở trang chi tiết
                     })
                     .ToListAsync();
 
-                return Ok(orders);
-            }
-            catch (UnauthorizedAccessException ex)
-            {
-                // This catch block is for when GetUserId() throws UnauthorizedAccessException
-                return Unauthorized(new { message = ex.Message });
+                // Trả về kết quả kèm thông tin phân trang
+                return Ok(new
+                {
+                    TotalItems = totalItems,
+                    PageNumber = pageNumber,
+                    PageSize = pageSize,
+                    Data = orders
+                });
             }
             catch (Exception ex)
             {
                 Console.WriteLine($"Error in GetMyOrders: {ex.Message}");
-                Console.WriteLine($"Stack Trace: {ex.StackTrace}");
                 return StatusCode(500, new { message = $"Internal server error: {ex.Message}" });
             }
         }
+
 
         [HttpGet("orders/{id}")]
         public async Task<IActionResult> GetOrderDetail(int id)
@@ -945,105 +896,109 @@ namespace AutoSaleDN.Controllers
             try
             {
                 var userId = GetUserId();
-                // Break down the Include/ThenInclude chain for better type inference
-                var orderQuery = _context.CarSales.Where(s => s.SaleId == id && s.CustomerId == userId);
-
-                orderQuery = orderQuery.Include(cs => cs.SaleStatus);
-                orderQuery = orderQuery.Include(cs => cs.StoreListing)
-                                         .ThenInclude(sl => sl.CarListing)
-                                             .ThenInclude(cl => cl.Model)
-                                                 .ThenInclude(cm => cm.CarManufacturer);
-                orderQuery = orderQuery.Include(cs => cs.ShippingAddress);
-                orderQuery = orderQuery.Include(cs => cs.PickupStoreLocation);
-                orderQuery = orderQuery.Include(cs => cs.DepositPayment);
-                orderQuery = orderQuery.Include(cs => cs.FullPayment);
-
-                // DÒNG ĐƯỢC THÊM: Include SaleStatusHistory
-                orderQuery = orderQuery.Include(cs => cs.StatusHistory)
-                                         .ThenInclude(sh => sh.SaleStatus);
-
-
-                var order = await orderQuery.FirstOrDefaultAsync();
-
-                if (order == null) return NotFound("Order not found or unauthorized.");
-
-                // Map to an anonymous object or a DTO to return relevant data
-                return Ok(new
+                if (userId == 0)
                 {
-                    order.SaleId,
-                    order.OrderNumber,
-                    CarDetails = new
+                    return Unauthorized(new { message = "User not authenticated." });
+                }
+
+                // Dùng Select để tạo DTO trực tiếp từ database, hiệu quả hơn dùng nhiều Include
+                var orderDetail = await _context.CarSales
+                    .AsNoTracking() // Tăng hiệu năng cho truy vấn chỉ đọc
+                    .Where(s => s.SaleId == id && s.CustomerId == userId)
+                    .Select(cs => new // Projection
                     {
-                        ListingId = order.StoreListing.CarListing.ListingId,
-                        ModelName = order.StoreListing.CarListing.Model.Name,
-                        ManufacturerName = order.StoreListing.CarListing.Model.CarManufacturer.Name,
-                        Price = order.StoreListing.CarListing.Price,
-                        Year = order.StoreListing.CarListing.Year,
-                        Condition = order.StoreListing.CarListing.Condition,
-                        Vin = order.StoreListing.CarListing.Vin,
-                        ImageUrls = _context.CarImages.Where(ci => ci.ListingId == order.StoreListing.CarListing.ListingId).Select(ci => ci.Url).ToList(),
-                        VideoUrls = _context.CarVideos.Where(cv => cv.ListingId == order.StoreListing.CarListing.ListingId).Select(cv => cv.Url).ToList()
-                    },
-                    order.FinalPrice,
-                    order.DepositAmount,
-                    order.RemainingBalance,
-                    Status = order.SaleStatus?.StatusName,
-                    order.DeliveryOption,
-                    ShippingAddress = order.ShippingAddress != null ? new
-                    {
-                        order.ShippingAddress.AddressId,
-                        order.ShippingAddress.Address,
-                        order.ShippingAddress.RecipientName,
-                        order.ShippingAddress.RecipientPhone,
-                        order.ShippingAddress.AddressType
-                    } : null,
-                    PickupLocation = order.PickupStoreLocation != null ? new
-                    {
-                        order.PickupStoreLocation.StoreLocationId,
-                        order.PickupStoreLocation.Name,
-                        order.PickupStoreLocation.Address,
-                    } : null,
-                    order.ExpectedDeliveryDate,
-                    order.ActualDeliveryDate,
-                    DepositPayment = order.DepositPayment != null ? new
-                    {
-                        order.DepositPayment.PaymentId,
-                        order.DepositPayment.Amount,
-                        order.DepositPayment.PaymentMethod,
-                        order.DepositPayment.PaymentStatus,
-                        order.DepositPayment.DateOfPayment
-                    } : null,
-                    FullPayment = order.FullPayment != null ? new
-                    {
-                        order.FullPayment.PaymentId,
-                        order.FullPayment.Amount,
-                        order.FullPayment.PaymentMethod,
-                        order.FullPayment.PaymentStatus,
-                        order.FullPayment.DateOfPayment
-                    } : null,
-                    // TRƯỜNG ĐƯỢC THÊM: Lấy và sắp xếp lịch sử trạng thái
-                    StatusHistory = order.StatusHistory
+                        cs.SaleId,
+                        cs.OrderNumber,
+                        CarDetails = new
+                        {
+                            ListingId = cs.StoreListing.CarListing.ListingId,
+                            ModelName = cs.StoreListing.CarListing.Model.Name,
+                            ManufacturerName = cs.StoreListing.CarListing.Model.CarManufacturer.Name,
+                            Price = cs.StoreListing.CarListing.Price,
+                            Year = cs.StoreListing.CarListing.Year,
+                            Mileage = cs.StoreListing.CarListing.Mileage,
+                            Condition = cs.StoreListing.CarListing.Condition,
+                            Vin = cs.StoreListing.CarListing.Vin,
+                            // SỬA LỖI: Thêm các trường còn thiếu từ Specifications
+                            Engine = cs.StoreListing.CarListing.Specifications.Select(s => s.Engine).FirstOrDefault(),
+                            Transmission = cs.StoreListing.CarListing.Specifications.Select(s => s.Transmission).FirstOrDefault(),
+                            FuelType = cs.StoreListing.CarListing.Specifications.Select(s => s.FuelType).FirstOrDefault(),
+                            // Tối ưu: Lấy danh sách ảnh và video trực tiếp trong câu truy vấn chính
+                            ImageUrls = cs.StoreListing.CarListing.CarImages.Select(ci => ci.Url).ToList(),
+                            VideoUrls = cs.StoreListing.CarListing.CarVideos.Select(cv => cv.Url).ToList()
+                        },
+                        cs.FinalPrice,
+                        cs.DepositAmount,
+                        cs.RemainingBalance,
+                        Status = cs.SaleStatus.StatusName,
+                        cs.DeliveryOption,
+                        ShippingAddress = cs.ShippingAddress != null ? new
+                        {
+                            cs.ShippingAddress.AddressId,
+                            cs.ShippingAddress.Address,
+                            cs.ShippingAddress.RecipientName,
+                            cs.ShippingAddress.RecipientPhone,
+                            cs.ShippingAddress.AddressType
+                        } : null,
+                        PickupLocation = cs.PickupStoreLocation != null ? new
+                        {
+                            cs.PickupStoreLocation.StoreLocationId,
+                            cs.PickupStoreLocation.Name,
+                            cs.PickupStoreLocation.Address,
+                        } : null,
+                        cs.ExpectedDeliveryDate,
+                        cs.ActualDeliveryDate,
+                        DepositPayment = cs.DepositPayment != null ? new
+                        {
+                            cs.DepositPayment.PaymentId,
+                            cs.DepositPayment.Amount,
+                            cs.DepositPayment.PaymentMethod,
+                            cs.DepositPayment.PaymentStatus,
+                            cs.DepositPayment.DateOfPayment
+                        } : null,
+                        FullPayment = cs.FullPayment != null ? new
+                        {
+                            cs.FullPayment.PaymentId,
+                            cs.FullPayment.Amount,
+                            cs.FullPayment.PaymentMethod,
+                            cs.FullPayment.PaymentStatus,
+                            cs.FullPayment.DateOfPayment
+                        } : null,
+                        StatusHistory = cs.StatusHistory
                                         .OrderBy(sh => sh.Timestamp)
                                         .Select(sh => new {
                                             Id = sh.SaleStatusId,
                                             Name = sh.SaleStatus.StatusName,
                                             Date = sh.Timestamp,
                                             Notes = sh.Notes
-                                        })
-                                        .ToList(),
-                    order.OrderType,
-                    order.CreatedAt,
-                    order.UpdatedAt
-                });
-            }
-            catch (UnauthorizedAccessException ex)
-            {
-                return Unauthorized(new { message = ex.Message });
+                                        }).ToList(),
+                        cs.OrderType,
+                        cs.CreatedAt,
+                        cs.UpdatedAt,
+                        SellerDetails = cs.StoreListing.StoreLocation != null ? new
+                        {
+                            SellerInfo = cs.StoreListing.StoreLocation.Users
+                                .Select(u => new
+                                {
+                                    u.UserId,
+                                    u.FullName,
+                                    u.Email,
+                                    PhoneNumber = u.Mobile
+                                }).FirstOrDefault()
+                        } : null,
+                    })
+                    .FirstOrDefaultAsync();
+
+                if (orderDetail == null)
+                {
+                    return NotFound(new { message = "Order not found or you do not have permission to view it." });
+                }
+
+                return Ok(orderDetail);
             }
             catch (Exception ex)
             {
                 Console.WriteLine($"Error in GetOrderDetail: {ex.Message}");
-                Console.WriteLine($"Stack Trace: {ex.StackTrace}");
                 return StatusCode(500, new { message = $"Internal server error: {ex.Message}" });
             }
         }

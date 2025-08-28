@@ -193,28 +193,10 @@ public async Task<IActionResult> GetCars(
 {
     try
     {
-        // Tối ưu query với AsSplitQuery để tránh cartesian explosion
-        var query = _context.CarListings
-            .AsSplitQuery()
-            .Include(c => c.Model)
-                .ThenInclude(m => m.CarManufacturer)
-            .Include(c => c.Specifications)
-            .Include(c => c.CarImages)
-            .Include(c => c.CarListingFeatures)
-                .ThenInclude(clf => clf.Feature)
-            .Include(c => c.CarServiceHistories)
-            .Include(c => c.CarPricingDetails)
-            .Include(c => c.StoreListings)
-                .ThenInclude(sl => sl.CarSales)
-                    .ThenInclude(cs => cs.SaleStatus)
-            .Include(c => c.Reviews)
-                .ThenInclude(r => r.User)
-            .Include(c => c.StoreListings)
-                .ThenInclude(cs => cs.StoreLocation)
-            .AsQueryable();
+            var query = _context.CarListings.AsQueryable();
 
-        // Apply filters with null checks
-        if (!string.IsNullOrEmpty(keyword))
+            // Apply filters with null checks
+            if (!string.IsNullOrEmpty(keyword))
         {
             query = query.Where(c =>
                 (c.Model != null && c.Model.Name.Contains(keyword)) ||
@@ -315,165 +297,111 @@ public async Task<IActionResult> GetCars(
             }
         }
 
-        // Simplified availability filter với null checks
-        query = query.Where(c =>
-            c.StoreListings == null || 
-            !c.StoreListings.Any() ||
-            !c.StoreListings
-                .Where(sl => sl.CarSales != null)
-                .SelectMany(sl => sl.CarSales)
-                .Where(cs => cs.SaleStatus != null)
-                .Any(cs => cs.SaleStatus.StatusName == "Payment Complete")
-        );
+            query = query.Where(c => !c.StoreListings.SelectMany(sl => sl.CarSales)
+                                      .Any(cs => cs.SaleStatus.StatusName == "Payment Complete" || cs.SaleStatus.StatusName == "Sold"));
 
-        // Apply sorting
-        switch (sortBy?.ToLower())
-        {
-            case "price_asc":
-                query = query.OrderBy(c => c.Price);
-                break;
-            case "price_desc":
-                query = query.OrderByDescending(c => c.Price);
-                break;
-            case "year_asc":
-                query = query.OrderBy(c => c.Year);
-                break;
-            case "year_desc":
-                query = query.OrderByDescending(c => c.Year);
-                break;
-            case "mileage_asc":
-                query = query.OrderBy(c => c.Mileage);
-                break;
-            case "mileage_desc":
-                query = query.OrderByDescending(c => c.Mileage);
-                break;
-            default:
-                query = query.OrderByDescending(c => c.DatePosted);
-                break;
-        }
+            var availableStatuses = new List<string> { "Available", "Pending Deposit" };
 
-        // Get total count trước khi apply pagination
-        var totalResults = await query.CountAsync();
-
-        // Apply pagination
-        var carsToSkip = (page - 1) * perPage;
-        var pagedQuery = query.Skip(carsToSkip).Take(perPage);
-
-        // Execute query với error handling
-        var cars = await pagedQuery
-            .Select(c => new
-            {
-                c.ListingId,
-                c.ModelId,
-                c.UserId,
-                c.Year,
-                c.Mileage,
-                c.Price,
-                c.Condition,
-                c.DatePosted,
-                c.Description,
-                Model = c.Model != null ? new
-                {
-                    c.Model.ModelId,
-                    c.Model.Name,
-                    Manufacturer = c.Model.CarManufacturer != null ? new
-                    {
-                        c.Model.CarManufacturer.ManufacturerId,
-                        c.Model.CarManufacturer.Name
-                    } : null
-                } : null,
-                Specifications = c.Specifications != null ? c.Specifications.Select(s => new
-                {
-                    s.SpecificationId,
-                    s.Engine,
-                    s.Transmission,
-                    s.FuelType,
-                    s.SeatingCapacity,
-                    s.CarType
-                }).ToList() : null,
-                Images = c.CarImages != null ? c.CarImages.Select(i => new
-                {
-                    i.ImageId,
-                    i.Url,
-                    i.Filename
-                }).ToList() : null,
-                Features = c.CarListingFeatures != null ? c.CarListingFeatures
-                    .Where(clf => clf.Feature != null)
-                    .Select(f => new
-                    {
-                        f.Feature.FeatureId,
-                        f.Feature.Name
-                    }).ToList() : null,
-                ServiceHistory = c.CarServiceHistories != null ? c.CarServiceHistories.Select(sh => new
-                {
-                    sh.RecentServicing,
-                    sh.NoAccidentHistory,
-                    sh.Modifications
-                }).ToList() : null,
-                Pricing = c.CarPricingDetails != null ? c.CarPricingDetails.Select(p => new
-                {
-                    p.TaxRate,
-                    p.RegistrationFee
-                }).ToList() : null,
-                SalesHistory = c.CarSales != null ? c.CarSales.Select(s => new
-                {
-                    s.SaleId,
-                    s.FinalPrice,
-                    s.SaleDate,
-                    SaleStatus = s.SaleStatus != null ? s.SaleStatus.StatusName : null
-                }).ToList() : null,
-                Reviews = c.Reviews != null ? c.Reviews
-                    .Where(r => r.User != null)
-                    .Select(r => new
-                    {
-                        r.ReviewId,
-                        r.UserId,
-                        r.Rating,
-                        r.User.FullName,
-                        r.CreatedAt
-                    }).ToList() : null,
-                Showrooms = c.StoreListings != null ? c.StoreListings
-                    .Where(sl => sl.StoreLocation != null)
-                    .Select(cs => new
-                    {
-                        cs.StoreLocation.StoreLocationId,
-                        cs.StoreLocation.Name,
-                        cs.StoreLocation.Address,
-                    }).ToList() : null,
-                CurrentSaleStatus = c.StoreListings != null ? 
+            var orderedQuery = query.OrderByDescending(c =>
+                availableStatuses.Contains(
                     c.StoreListings
-                        .Where(sl => sl.CarSales != null)
-                        .SelectMany(sl => sl.CarSales)
-                        .Where(cs => cs.SaleStatus != null)
-                        .OrderByDescending(s => s.CreatedAt)
-                        .Select(s => s.SaleStatus.StatusName)
-                        .FirstOrDefault() ?? "Available" : "Available"
-            })
-            .ToListAsync();
+                     .SelectMany(sl => sl.CarSales)
+                     .OrderByDescending(cs => cs.CreatedAt)
+                     .Select(cs => cs.SaleStatus.StatusName)
+                     .FirstOrDefault() ?? "Available"
+                )
+            );
 
-        var totalPages = totalResults > 0 ? (int)Math.Ceiling((double)totalResults / perPage) : 0;
+            switch (sortBy?.ToLower())
+            {
+                case "price_asc":
+                    orderedQuery = orderedQuery.ThenBy(c => c.Price);
+                    break;
+                case "price_desc":
+                    orderedQuery = orderedQuery.ThenByDescending(c => c.Price);
+                    break;
+                case "year_desc":
+                    orderedQuery = orderedQuery.ThenByDescending(c => c.Year);
+                    break;
+                case "year_asc":
+                    orderedQuery = orderedQuery.ThenBy(c => c.Year);
+                    break;
+                case "mileage_desc":
+                    orderedQuery = orderedQuery.ThenByDescending(c => c.Mileage);
+                    break;
+                case "mileage_asc":
+                    orderedQuery = orderedQuery.ThenBy(c => c.Mileage);
+                    break;
+                default:
+                    orderedQuery = orderedQuery.ThenByDescending(c => c.DatePosted);
+                    break;
+            }
 
-        return Ok(new
+            var totalResults = await orderedQuery.CountAsync();
+            var totalPages = (int)Math.Ceiling(totalResults / (double)perPage);
+
+            var cars = await orderedQuery
+                .Skip((page - 1) * perPage)
+                .Take(perPage)
+                .Select(c => new
+                {
+                    c.ListingId,
+                    c.ModelId,
+                    c.UserId,
+                    c.Year,
+                    c.Mileage,
+                    c.Price,
+                    c.Condition,
+                    c.DatePosted,
+                    c.Description,
+                    Model = new
+                    {
+                        c.Model.ModelId,
+                        c.Model.Name,
+                        Manufacturer = new
+                        {
+                            c.Model.CarManufacturer.ManufacturerId,
+                            c.Model.CarManufacturer.Name
+                        }
+                    },
+                    Specifications = c.Specifications.Select(s => new {
+                        s.SpecificationId,
+                        s.Engine,
+                        s.Transmission,
+                        s.FuelType,
+                        s.SeatingCapacity,
+                        s.CarType
+                    }).ToList(),
+                    Images = c.CarImages.Select(i => new { i.ImageId, i.Url, i.Filename }).ToList(),
+                    Features = c.CarListingFeatures.Select(f => new { f.Feature.FeatureId, f.Feature.Name }).ToList(),
+                    ServiceHistory = c.CarServiceHistories.Select(sh => new { sh.RecentServicing, sh.NoAccidentHistory, sh.Modifications }).ToList(),
+                    Pricing = c.CarPricingDetails.Select(p => new { p.TaxRate, p.RegistrationFee }).ToList(),
+                    SalesHistory = c.CarSales.Select(s => new { s.SaleId, s.FinalPrice, s.SaleDate, SaleStatus = s.SaleStatus.StatusName }).ToList(),
+                    Reviews = c.Reviews.Select(r => new { r.ReviewId, r.UserId, r.Rating, r.User.FullName, r.CreatedAt }).ToList(),
+                    Showrooms = c.StoreListings.Select(cs => new { cs.StoreLocation.StoreLocationId, cs.StoreLocation.Name, cs.StoreLocation.Address }).ToList(),
+                    CurrentSaleStatus = c.StoreListings
+                                         .SelectMany(sl => sl.CarSales)
+                                         .OrderByDescending(s => s.CreatedAt)
+                                         .Select(s => s.SaleStatus.StatusName)
+                                         .FirstOrDefault() ?? "Available"
+                })
+                .ToListAsync();
+
+            return Ok(new
+            {
+                cars,
+                totalResults,
+                totalPages,
+                currentPage = page,
+                perPage
+            });
+        }
+        catch (Exception ex)
         {
-            cars = cars,
-            totalResults = totalResults,
-            totalPages = totalPages,
-            currentPage = page,
-            perPage = perPage
-        });
+            Console.WriteLine($"Error in GetCars: {ex.Message} \n {ex.StackTrace}");
+            return StatusCode(500, new { message = "An error occurred while processing your request." });
+        }
     }
-    catch (Exception ex)
-    {
-        // Log exception details
-        // _logger.LogError(ex, "Error occurred while fetching cars");
-        
-        return StatusCode(500, new
-        {
-            message = "An error occurred while processing your request",
-            error = ex.Message // Remove this in production
-        });
-    }
-}
 
     [HttpGet("cars/{id}")]
     public async Task<IActionResult> GetCarDetail(int id)
