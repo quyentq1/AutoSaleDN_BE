@@ -1297,7 +1297,7 @@ namespace AutoSaleDN.Controllers
 
             // Kiểm tra xem xe có tồn tại không
             var storeListing = await _context.StoreListings
-                .FirstOrDefaultAsync(sl => sl.StoreListingId == bookingDto.StoreListingId && !sl.IsCurrent);
+                .FirstOrDefaultAsync(sl => sl.StoreListingId == bookingDto.StoreListingId && sl.IsCurrent);
 
             if (storeListing == null)
             {
